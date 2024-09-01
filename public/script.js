@@ -38,7 +38,7 @@ function onPlayerStateChange(event) {
 
 // ฟังก์ชันสำหรับการเล่นเพลงถัดไป
 function playNextSong() {
-  if (songQueue.length > 0) {
+  if (songQueue.length > 0 || player && typeof player.loadVideoById === 'function') {
       const nextSong = songQueue[0];
       const videoId = extractVideoId(nextSong);
       player.loadVideoById(videoId);
@@ -76,10 +76,7 @@ function addSong() {
         if (songQueue.length === 1) {
             // เริ่มเล่นเพลงแรก
             playNextSong();
-        }  else {
-        queueUpdated();  // อัปเดต UI ถ้าไม่ใช่เพลงแรก
-        }
-      
+        }  
     }
   }
 }
