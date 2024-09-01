@@ -1,0 +1,173 @@
+body {
+    background-color: #1b1b1b;
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+h1 {
+    font-size: 36px;
+    margin-bottom: 10px;
+    color: #ffffff;
+}
+
+input[type="text"] {
+    padding: 10px;
+    font-size: 16px;
+    width: 60%;
+    margin-right: 10px;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 16px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+.player-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 20px;
+}
+
+#videoPlayer {
+    width: 640px;
+    height: 360px;
+    margin-bottom: 10px;
+}
+
+#current-song-info {
+    text-align: center;
+}
+
+.queue-section {
+    margin-top: 30px;
+}
+
+.queue-section h3 {
+    font-size: 24px;
+    margin-bottom: 10px;
+}
+
+ul#queue {
+    list-style-type: none;
+    padding: 0;
+}
+
+ul#queue li {
+    display: flex;
+    align-items: center;
+    background-color: #333333;
+    padding: 10px;
+    margin-bottom: 5px;
+    border-radius: 5px;
+}
+
+ul#queue li img.thumbnail {
+    width: 80px;
+    height: 45px;
+    margin-right: 10px;
+    border-radius: 4px;
+}
+
+ul#queue li span {
+    flex-grow: 1;
+    font-size: 16px;
+}
+
+ul#queue li button {
+    background-color: #ff4d4d;
+    padding: 5px 10px;
+    font-size: 14px;
+    margin-left: 5px;
+    border-radius: 3px;
+}
+
+ul#queue li button:hover {
+    background-color: #ff0000;
+}
+
+ul#queue li button.up-button, ul#queue li button.down-button {
+    background-color: #007bff;
+}
+
+ul#queue li button.up-button:hover, ul#queue li button.down-button:hover {
+    background-color: #0056b3;
+}
+/* สไตล์สำหรับ loading indicator */
+.loading-indicator {
+    font-size: 16px;
+    color: #007bff;
+    margin-right: 10px;
+}
+
+/* สไตล์สำหรับข้อความเมื่อไม่สามารถโหลดข้อมูลได้ */
+.error-text {
+    font-size: 14px;
+    color: #ff4d4d;
+}
+
+/* สไตล์สำหรับรายการคิวเพลง */
+.song-item {
+    display: flex;
+    align-items: center;
+    background-color: #333333;
+    padding: 10px;
+    margin-bottom: 5px;
+    border-radius: 5px;
+}
+
+.thumbnail {
+    width: 80px;
+    height: 45px;
+    margin-right: 10px;
+    border-radius: 4px;
+}
+
+.song-title {
+    flex-grow: 1;
+    font-size: 16px;
+}
+
+.song-controls {
+    display: flex;
+}
+
+.btn-remove, .btn-up, .btn-down {
+    background-color: #007bff;
+    padding: 5px 10px;
+    font-size: 14px;
+    margin-left: 5px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.btn-remove {
+    background-color: #ff4d4d;
+}
+
+.btn-remove:hover {
+    background-color: #ff0000;
+}
+
+.btn-up:hover, .btn-down:hover {
+    background-color: #0056b3;
+}
+
+.btn-remove:disabled, .btn-up:disabled, .btn-down:disabled {
+    background-color: #555555;
+    cursor: not-allowed;
+}
