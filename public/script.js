@@ -70,7 +70,7 @@ function playNextSong() {
       // อัปเดตชื่อเพลงที่กำลังเล่น
       fetchVideoDetails(videoId, (videoDetails) => {
           const nowPlayingTitle = document.getElementById('nowPlaying');
-          nowPlayingTitle.textContent = `Now Playing: ${videoDetails.title}`;
+          nowPlayingTitle.textContent = `กำลังเล่น: ${videoDetails.title}`;
       });
       
       
@@ -82,7 +82,7 @@ function playNextSong() {
       
       // ลบชื่อเพลงเมื่อไม่มีเพลงเล่น
       const nowPlayingTitle = document.getElementById('nowPlaying');
-      nowPlayingTitle.textContent = '';
+      nowPlayingTitle.textContent = 'ไม่มีเพลง';
   }
 }
 
