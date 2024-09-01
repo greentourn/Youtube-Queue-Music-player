@@ -190,7 +190,7 @@ socket.on('queueUpdated', (queue) => {
   
           const titleText = document.createElement('span');
           titleText.textContent = title;
-          titleText.className = 'd-flex';
+          titleText.className = 'd-flex text-white';
   
           const controlsElement = document.createElement('div');
           controlsElement.className = 'song-controls';

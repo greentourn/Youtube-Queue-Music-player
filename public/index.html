@@ -6,14 +6,14 @@
   <title>Music Queue</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    body { padding-top: 20px; }
-    .song-item { display: flex; align-items: center; margin-bottom: 10px; }
+    body { padding-top: 20px; background-color: #0f0f0f; }
+    .song-item { display: flex; align-items: center; margin-bottom: 10px; background-color: #2b2b2b; }
     .song-item img { width: 120px; height: 90px; margin-right: 10px; }
     .song-controls { display: grid; margin-left: auto; }
     .list-group {height: 500px;}
     .now-playing-title {
     font-size: 18px;
-    color: #000000;
+    color: #ffffff;
     margin-top: 10px;
     text-align: center;
 }
@@ -21,7 +21,7 @@
 </head>
 <body>
   <div class="container">
-    <h1 class="mb-4">Music Queue</h1>
+    <h1 class="mb-4 text-white">Music Queue</h1>
     
     <div class="row mb-4">
       <div class="col-md-8">
@@ -39,7 +39,7 @@
         <button class="btn btn-secondary w-100" onclick="skipSong()">Skip Song >>></button>
       </div>
       <div class="col-md-4">
-        <h2>Queue</h2>
+        <h2 class="text-white" >Queue</h2>
         <div id="queue" class="list-group overflow-auto"></div>
       </div>
     </div>
