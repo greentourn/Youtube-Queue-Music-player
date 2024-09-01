@@ -73,6 +73,7 @@ function playNextSong() {
           nowPlayingTitle.textContent = `Now Playing: ${videoDetails.title}`;
       });
       
+      
   } else {
       isSongPlaying = false;
       currentPlayingIndex = -1;  // ถ้าคิวเพลงว่าง ให้รีเซ็ตสถานะการเล่น
@@ -121,14 +122,17 @@ function skipSong() {
 }
 
 function removeSong(index) {
-  // ถ้าคิวเพลงเหลือเพลงเดียว
+  const listItem = document.querySelectorAll('.song-item')[index-1];
+  listItem.classList.add('fade-out');
+    // ถ้าคิวเพลงเหลือเพลงเดียว
   if (songQueue.length === 1 && index === currentPlayingIndex) {
-    // ไม่รีเซ็ตหรือหยุดเล่นเพลง แค่ลบออกจากคิว
-    socket.emit('removeSong', index);
-    // ไม่ต้องเรียก playNextSong() หรือทำอะไรเพิ่มเติม
+    setTimeout(() => {
+      socket.emit('removeSong', index);
+    }, 300);
   } else if (index !== currentPlayingIndex) {
-    // ลบเพลงที่ไม่ได้กำลังเล่นอยู่
-    socket.emit('removeSong', index);
+    setTimeout(() => {
+      socket.emit('removeSong', index);
+    }, 300);
     
     // อัปเดต currentPlayingIndex ถ้าจำเป็น
     if (index < currentPlayingIndex) {
@@ -138,7 +142,23 @@ function removeSong(index) {
 }
 
 function moveSong(fromIndex, toIndex) {
-  socket.emit('moveSong', fromIndex, toIndex);
+  const songItems = document.querySelectorAll('.song-item');
+  const movingItem = songItems[fromIndex-1];
+  
+  // ตรวจสอบทิศทางการย้าย
+  const direction = toIndex < fromIndex ? 'move-up' : 'move-down';
+  
+  // เพิ่มคลาสแอนิเมชันให้กับ element ที่ย้าย
+  movingItem.classList.add(direction);
+
+  // รอให้แอนิเมชันเสร็จสิ้นก่อนส่งข้อมูลไปยังเซิร์ฟเวอร์
+  setTimeout(() => {
+    // ลบคลาสแอนิเมชันหลังจากย้ายเสร็จ
+    movingItem.classList.remove(direction);
+    
+    // ส่งข้อมูลการย้ายไปยังเซิร์ฟเวอร์
+    socket.emit('moveSong', fromIndex, toIndex);
+  }, 300); // 300ms ต้องตรงกับระยะเวลาของแอนิเมชันใน CSS
 }
 
 // ฟังก์ชันที่ใช้ในการดึง Video ID จากลิงก์ YouTube
@@ -169,6 +189,9 @@ socket.on('queueUpdated', (queue) => {
       loadingIndicator.textContent = 'กำลังโหลด...';
       loadingIndicator.className = 'spinner-border text-primary';
       listItem.appendChild(loadingIndicator);
+
+      // เพิ่มคลาสแอนิเมชัน fade-in
+      listItem.classList.add('fade-in');
   
       // เพิ่ม listItem เข้าไปใน queueList ทันที เพื่อให้เห็น Loading Indicator
       queueList.appendChild(listItem);
