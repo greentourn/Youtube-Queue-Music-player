@@ -11,6 +11,12 @@
     .song-item img { width: 120px; height: 90px; margin-right: 10px; }
     .song-controls { display: grid; margin-left: auto; }
     .list-group {height: 500px;}
+    .now-playing-title {
+    font-size: 18px;
+    color: #000000;
+    margin-top: 10px;
+    text-align: center;
+}
   </style>
 </head>
 <body>
@@ -28,6 +34,7 @@
 
     <div class="row">
       <div class="col-md-8">
+        <h3 id="nowPlaying" class="now-playing-title"></h3>
         <div id="player" class="mb-3"></div>
         <button class="btn btn-secondary w-100" onclick="skipSong()">Skip Song >>></button>
       </div>

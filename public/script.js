@@ -60,24 +60,28 @@ function onPlayerStateChange(event) {
 
 // ฟังก์ชันสำหรับการเล่นเพลงถัดไป
 function playNextSong() {
-  if (songQueue.length > 1) {
-    // คิวมีมากกว่า 1 เพลง ให้เล่นเพลงถัดไป
-    currentPlayingIndex = (currentPlayingIndex + 1) % songQueue.length;
-    const nextSong = songQueue[currentPlayingIndex];
-    const videoId = extractVideoId(nextSong);
-    player.loadVideoById(videoId);
-    isSongPlaying = true;
-  } else if (songQueue.length === 1) {
-    // คิวเหลือเพลงเดียว ให้เล่นเพลงเดียวที่เหลือ
-    const nextSong = songQueue[0];
-    const videoId = extractVideoId(nextSong);
-    player.loadVideoById(videoId);
-    isSongPlaying = true;
+  if (songQueue.length > 0) {
+      const nextSong = songQueue[0];
+      const videoId = extractVideoId(nextSong);
+      player.loadVideoById(videoId);
+      isSongPlaying = true;
+      currentPlayingIndex = 0;  // ตั้งค่าสถานะเป็นกำลังเล่น
+      
+      // อัปเดตชื่อเพลงที่กำลังเล่น
+      fetchVideoDetails(videoId, (videoDetails) => {
+          const nowPlayingTitle = document.getElementById('nowPlaying');
+          nowPlayingTitle.textContent = `Now Playing: ${videoDetails.title}`;
+      });
+      
   } else {
-    // ไม่มีเพลงในคิว ให้หยุดเล่นเพลง
-    isSongPlaying = false;
-    currentPlayingIndex = -1;
-    player.stopVideo();
+      isSongPlaying = false;
+      currentPlayingIndex = -1;  // ถ้าคิวเพลงว่าง ให้รีเซ็ตสถานะการเล่น
+      // หยุดเล่นเพลง
+      player.stopVideo();
+      
+      // ลบชื่อเพลงเมื่อไม่มีเพลงเล่น
+      const nowPlayingTitle = document.getElementById('nowPlaying');
+      nowPlayingTitle.textContent = '';
   }
 }
 
