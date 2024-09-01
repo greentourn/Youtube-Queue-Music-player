@@ -7,8 +7,8 @@ const apiKey = 'AIzaSyB9lB2v1PLpfilw_a5dEqfD-yw3WNhtxE4';
 // ฟังก์ชันที่จะถูกเรียกเมื่อ YouTube IFrame Player API พร้อมใช้งาน
 function onYouTubeIframeAPIReady() {
   player = new YT.Player('player', {
-    height: '390',
-    width: '640',
+    height: '480px',
+    width: '100%',
     videoId: '',  // เริ่มต้นยังไม่มีวิดีโอ
     events: {
       'onReady': onPlayerReady,
@@ -186,7 +186,7 @@ socket.on('queueUpdated', (queue) => {
   
           const titleText = document.createElement('span');
           titleText.textContent = title;
-          titleText.className = 'flex-grow-1';
+          titleText.className = 'd-flex';
   
           const controlsElement = document.createElement('div');
           controlsElement.className = 'song-controls';
@@ -227,6 +227,7 @@ socket.on('queueUpdated', (queue) => {
           errorText.textContent = 'ไม่สามารถโหลดข้อมูลวิดีโอได้';
           errorText.className = 'text-danger';
           listItem.appendChild(errorText);
+          socket.emit('removeSong', index);
         }
       );
     });
