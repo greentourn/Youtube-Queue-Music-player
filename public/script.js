@@ -80,6 +80,13 @@ function addSong() {
     }
   }
 }
+socket.on('connect', () => {
+  console.log('Connected to server');
+
+  // ตอนนี้คุณสามารถใช้งาน socket ได้
+  document.getElementById('addSongButton').addEventListener('click', addSong);
+});
+
 
 // ฟังก์ชันในการข้ามเพลง
 function skipSong() {
