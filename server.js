@@ -1,13 +1,32 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const axios = require('axios');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+const apiKey = process.env.YOUTUBE_API_KEY;
 
 let songQueue = [];
+
+app.get('/youtube-info/:videoId', (req, res) => {
+  const videoId = req.params.videoId;
+  const apiKey = process.env.YOUTUBE_API_KEY;  // ดึง API Key จาก environment variable
+
+  const url = `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${apiKey}&part=snippet`;
+
+  axios.get(url)
+      .then(response => {
+          res.json(response.data.items[0].snippet);
+      })
+      .catch(error => {
+          res.status(500).send('Error retrieving video details');
+      });
+});
+
 
 app.use(express.static('public'));
 

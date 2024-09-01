@@ -2,7 +2,6 @@ const socket = io();
 let player;  // ตัวแปรที่จะเก็บ YouTube player instance
 let currentPlayingIndex = -1;
 let isSongPlaying = false;
-const apiKey = 'AIzaSyB9lB2v1PLpfilw_a5dEqfD-yw3WNhtxE4';
 
 // ฟังก์ชันที่จะถูกเรียกเมื่อ YouTube IFrame Player API พร้อมใช้งาน
 function onYouTubeIframeAPIReady() {
@@ -17,33 +16,12 @@ function onYouTubeIframeAPIReady() {
   });
 }
 
-function fetchVideoDetails(videoId, callback, errorCallback) {
-    const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
-  
-    fetch(url)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        return response.json();
-      })
-      .then(data => {
-        if (data.items && data.items.length > 0) {
-          const video = data.items[0].snippet;
-          const videoDetails = {
-            title: video.title,
-            thumbnail: video.thumbnails.default.url
-          };
-          callback(videoDetails);
-        } else {
-          throw new Error('Video not found');
-        }
-      })
-      .catch(error => {
-        console.error('Error fetching video details:', error);
-        errorCallback(error);
-      });
-  }
+function fetchVideoDetails(videoId, onSuccess, onError) {
+  fetch(`/youtube-info/${videoId}`)
+      .then(response => response.json())
+      .then(onSuccess)
+      .catch(onError);
+}
 // ฟังก์ชันเมื่อ player พร้อมใช้งาน
 function onPlayerReady(event) {
   playNextSong();  // เล่นเพลงแรกจากคิว
@@ -195,7 +173,7 @@ socket.on('queueUpdated', (queue) => {
   
       // เพิ่ม listItem เข้าไปใน queueList ทันที เพื่อให้เห็น Loading Indicator
       queueList.appendChild(listItem);
-  
+      
       // ดึงข้อมูลจาก YouTube API
       fetchVideoDetails(
         videoId,
@@ -204,13 +182,13 @@ socket.on('queueUpdated', (queue) => {
           listItem.removeChild(loadingIndicator);
   
           const title = videoDetails.title;
-          const thumbnail = videoDetails.thumbnail;
+          const thumbnail = videoDetails.thumbnails.default.url;
   
           const thumbnailImg = document.createElement('img');
           thumbnailImg.src = thumbnail;
           thumbnailImg.alt = title;
           thumbnailImg.className = 'me-3';
-  
+
           const titleText = document.createElement('span');
           titleText.textContent = title;
           titleText.className = 'd-flex text-white';
