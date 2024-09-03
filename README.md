@@ -1,6 +1,8 @@
 
 # YouTube Music Queue Player
 
+![image](https://github.com/user-attachments/assets/b829be41-16d4-4f23-885d-655796a38151)
+
 This project is a real-time YouTube music queue player that allows users to add YouTube links to a queue, view the current playing song, and manage the queue collaboratively. The server ensures that all connected users see and control the same queue of songs. This project is built using Node.js, Socket.io, and the YouTube Data API.
 
 ## Features
