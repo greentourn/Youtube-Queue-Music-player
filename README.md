@@ -53,11 +53,11 @@ This project is a real-time YouTube music queue player that allows users to add 
 
 ### Deployment
 
-To deploy the project on Vercel:
+To deploy the project on Render:
 
-1. Connect your GitHub repository to Vercel.
-2. Ensure that your environment variables are correctly set up on Vercel.
-3. Deploy the project directly from your Vercel dashboard.
+1. Connect your GitHub repository to Render.
+2. Ensure that your environment variables are correctly set up on Render.
+3. Deploy the project directly from your Render dashboard.
 
 ### Troubleshooting
 
