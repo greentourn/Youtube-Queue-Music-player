@@ -5,6 +5,7 @@ let isSongPlaying = false;
 let isInitialSync = true;
 let songQueue = [];
 let isProcessingStateUpdate = false;
+let lastKnownState = null;
 
 function onYouTubeIframeAPIReady() {
   player = new YT.Player('player', {
@@ -22,6 +23,45 @@ function onYouTubeIframeAPIReady() {
   });
 }
 
+function onPlayerStateChange(event) {
+  if (isProcessingStateUpdate) return;
+
+  if (!isInitialSync) {
+    switch(event.data) {
+      case YT.PlayerState.PLAYING:
+      case YT.PlayerState.PAUSED:
+        const state = {
+          videoId: player.getVideoData().video_id,
+          timestamp: player.getCurrentTime(),
+          isPlaying: event.data === YT.PlayerState.PLAYING
+        };
+        lastKnownState = state;
+        socket.emit('updatePlaybackState', state);
+        break;
+      
+      case YT.PlayerState.ENDED:
+        handleVideoEnded();
+        break;
+    }
+  }
+}
+
+// เพิ่มฟังก์ชันติดตามการเปลี่ยนแปลง timestamp
+setInterval(() => {
+  if (!isProcessingStateUpdate && player && player.getPlayerState() === YT.PlayerState.PAUSED) {
+    const currentTime = player.getCurrentTime();
+    if (lastKnownState && Math.abs(lastKnownState.timestamp - currentTime) > 0.5) {
+      const state = {
+        videoId: player.getVideoData().video_id,
+        timestamp: currentTime,
+        isPlaying: false
+      };
+      lastKnownState = state;
+      socket.emit('updatePlaybackState', state);
+    }
+  }
+}, 200);
+
 function fetchVideoDetails(videoId, onSuccess, onError) {
   fetch(`/youtube-info/${videoId}`)
     .then(response => response.json())
@@ -33,23 +73,31 @@ async function onPlayerReady(event) {
   try {
     const response = await fetch('/current-state');
     const { currentPlaybackState, songQueue: initialQueue } = await response.json();
-
+    
     if (currentPlaybackState.videoId) {
       const currentTime = Date.now();
       const timeDiff = (currentTime - currentPlaybackState.lastUpdate) / 1000;
-
-      player.loadVideoById({
-        videoId: currentPlaybackState.videoId,
-        startSeconds: currentPlaybackState.timestamp + timeDiff
+      
+      await new Promise((resolve) => {
+        player.loadVideoById({
+          videoId: currentPlaybackState.videoId,
+          startSeconds: currentPlaybackState.timestamp + timeDiff
+        });
+        
+        const checkState = setInterval(() => {
+          if (player.getPlayerState() !== YT.PlayerState.BUFFERING) {
+            clearInterval(checkState);
+            if (currentPlaybackState.isPlaying) {
+              player.playVideo();
+            } else {
+              player.pauseVideo();
+            }
+            resolve();
+          }
+        }, 100);
       });
-
-      if (currentPlaybackState.isPlaying) {
-        player.playVideo();
-      } else {
-        player.pauseVideo();
-      }
     }
-
+    
     updateQueue(initialQueue);
     isInitialSync = false;
   } catch (error) {
@@ -108,7 +156,21 @@ function playNextSong() {
       timestamp: 0,
       isPlaying: true
     };
-    socket.emit('updatePlaybackState', state);
+
+    isProcessingStateUpdate = true;
+    player.loadVideoById({
+      videoId: videoId,
+      startSeconds: 0
+    });
+
+    const checkState = setInterval(() => {
+      if (player.getPlayerState() !== YT.PlayerState.BUFFERING) {
+        clearInterval(checkState);
+        socket.emit('updatePlaybackState', state);
+        player.playVideo();
+        isProcessingStateUpdate = false;
+      }
+    }, 100);
 
     isSongPlaying = true;
     currentPlayingIndex = 0;
@@ -272,63 +334,101 @@ socket.on('connect', () => {
 socket.on('initialState', ({ songQueue: initialQueue, currentPlaybackState }) => {
   if (currentPlaybackState.videoId && player && player.loadVideoById) {
     isProcessingStateUpdate = true;
-
+    
     const currentTime = Date.now();
     const timeDiff = (currentTime - currentPlaybackState.lastUpdate) / 1000;
-
+    
     player.loadVideoById({
       videoId: currentPlaybackState.videoId,
       startSeconds: currentPlaybackState.timestamp + timeDiff
     });
 
-    if (currentPlaybackState.isPlaying) {
-      player.playVideo();
-    } else {
-      player.pauseVideo();
-    }
-
-    setTimeout(() => {
-      isProcessingStateUpdate = false;
-    }, 500);
+    // รอให้วิดีโอโหลดเสร็จก่อนเล่น
+    const checkState = setInterval(() => {
+      const playerState = player.getPlayerState();
+      if (playerState !== YT.PlayerState.BUFFERING && playerState !== -1) {
+        clearInterval(checkState);
+        if (currentPlaybackState.isPlaying) {
+          player.playVideo();
+        } else {
+          player.pauseVideo();
+        }
+        isProcessingStateUpdate = false;
+      }
+    }, 100);
   }
-
+  
   updateQueue(initialQueue);
 });
 
 socket.on('playbackState', (state) => {
   if (!player || !player.loadVideoById) return;
-
+  
   isProcessingStateUpdate = true;
-
+  lastKnownState = state;
+  
   const currentTime = Date.now();
   const timeDiff = (currentTime - state.lastUpdate) / 1000;
+  const currentVideoId = player.getVideoData()?.video_id;
 
-  if (state.videoId !== player.getVideoData()?.video_id) {
-    player.loadVideoById({
-      videoId: state.videoId,
-      startSeconds: state.timestamp + timeDiff
-    });
-  } else {
-    const currentPlayerTime = player.getCurrentTime();
-    const expectedTime = state.timestamp + timeDiff;
-
-    if (Math.abs(currentPlayerTime - expectedTime) > 2) {
-      player.seekTo(expectedTime, true);
+  const handlePlayback = () => {
+    const actualTimeDiff = (Date.now() - state.lastUpdate) / 1000;
+    const targetTime = state.timestamp + (state.isPlaying ? actualTimeDiff : 0);
+    
+    // Always seek to the target position when paused or if difference is significant
+    if (!state.isPlaying || Math.abs(player.getCurrentTime() - targetTime) > 2) {
+      player.seekTo(targetTime, true);
     }
 
-    if (state.isPlaying && player.getPlayerState() !== YT.PlayerState.PLAYING) {
+    if (state.isPlaying) {
       player.playVideo();
-    } else if (!state.isPlaying && player.getPlayerState() === YT.PlayerState.PLAYING) {
+    } else {
       player.pauseVideo();
     }
-  }
+  };
 
-  setTimeout(() => {
-    isProcessingStateUpdate = false;
-  }, 500);
+  if (state.videoId !== currentVideoId) {
+    player.loadVideoById({
+      videoId: state.videoId,
+      startSeconds: state.timestamp + (state.isPlaying ? timeDiff : 0)
+    });
+
+    const checkState = setInterval(() => {
+      const playerState = player.getPlayerState();
+      if (playerState !== YT.PlayerState.BUFFERING && playerState !== -1) {
+        clearInterval(checkState);
+        handlePlayback();
+        setTimeout(() => {
+          isProcessingStateUpdate = false;
+        }, 500);
+      }
+    }, 100);
+  } else {
+    handlePlayback();
+    setTimeout(() => {
+      isProcessingStateUpdate = false;
+    }, 500);
+  }
 });
 
-socket.on('queueUpdated', updateQueue);
+// ปรับปรุงการจัดการเมื่อเพิ่มเพลงใหม่
+socket.on('queueUpdated', (queue) => {
+  updateQueue(queue);
+  
+  if (queue.length === 1) {
+    const videoId = extractVideoId(queue[0]);
+    if (videoId) {
+      // เมื่อเพิ่มเพลงแรก ให้ทุก client เริ่มเล่นพร้อมกัน
+      const state = {
+        videoId: videoId,
+        timestamp: 0,
+        isPlaying: true,
+        lastUpdate: Date.now()
+      };
+      socket.emit('updatePlaybackState', state);
+    }
+  }
+});
 
 // เพิ่ม error handler สำหรับ socket connection
 socket.on('connect_error', (error) => {
