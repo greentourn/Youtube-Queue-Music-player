@@ -6,6 +6,8 @@ let isInitialSync = true;
 let songQueue = [];
 let isProcessingStateUpdate = false;
 let lastKnownState = null;
+let lastStateUpdate = Date.now();
+let syncInterval;
 
 function onYouTubeIframeAPIReady() {
   player = new YT.Player('player', {
@@ -21,6 +23,27 @@ function onYouTubeIframeAPIReady() {
       'rel': 0
     }
   });
+}
+
+function broadcastCurrentState() {
+  if (!isProcessingStateUpdate && player && player.getCurrentTime) {
+    const state = {
+      videoId: player.getVideoData()?.video_id,
+      timestamp: player.getCurrentTime(),
+      isPlaying: player.getPlayerState() === YT.PlayerState.PLAYING
+    };
+    lastKnownState = state;
+    socket.emit('updatePlaybackState', state);
+  }
+}
+// Sync state every 1 seconds if playing
+function startStateSync() {
+  if (syncInterval) clearInterval(syncInterval);
+  syncInterval = setInterval(() => {
+    if (player?.getPlayerState() === YT.PlayerState.PLAYING) {
+      broadcastCurrentState();
+    }
+  }, 1000);
 }
 
 function onPlayerStateChange(event) {
@@ -78,10 +101,11 @@ async function onPlayerReady(event) {
       const currentTime = Date.now();
       const timeDiff = (currentTime - currentPlaybackState.lastUpdate) / 1000;
       
+      isProcessingStateUpdate = true;
       await new Promise((resolve) => {
         player.loadVideoById({
           videoId: currentPlaybackState.videoId,
-          startSeconds: currentPlaybackState.timestamp + timeDiff
+          startSeconds: currentPlaybackState.timestamp + (currentPlaybackState.isPlaying ? timeDiff : 0)
         });
         
         const checkState = setInterval(() => {
@@ -92,6 +116,7 @@ async function onPlayerReady(event) {
             } else {
               player.pauseVideo();
             }
+            isProcessingStateUpdate = false;
             resolve();
           }
         }, 100);
@@ -100,6 +125,7 @@ async function onPlayerReady(event) {
     
     updateQueue(initialQueue);
     isInitialSync = false;
+    startStateSync();
   } catch (error) {
     console.error('Error fetching initial state:', error);
   }
@@ -109,17 +135,12 @@ function onPlayerStateChange(event) {
   if (isProcessingStateUpdate) return;
 
   if (!isInitialSync) {
-    switch (event.data) {
+    switch(event.data) {
       case YT.PlayerState.PLAYING:
       case YT.PlayerState.PAUSED:
-        const state = {
-          videoId: player.getVideoData().video_id,
-          timestamp: player.getCurrentTime(),
-          isPlaying: event.data === YT.PlayerState.PLAYING
-        };
-        socket.emit('updatePlaybackState', state);
+        broadcastCurrentState();
         break;
-
+      
       case YT.PlayerState.ENDED:
         handleVideoEnded();
         break;
@@ -364,10 +385,14 @@ socket.on('initialState', ({ songQueue: initialQueue, currentPlaybackState }) =>
 socket.on('playbackState', (state) => {
   if (!player || !player.loadVideoById) return;
   
+  const currentTime = Date.now();
+  // Ignore old state updates
+  if (state.lastUpdate < lastStateUpdate) return;
+  lastStateUpdate = state.lastUpdate;
+  
   isProcessingStateUpdate = true;
   lastKnownState = state;
   
-  const currentTime = Date.now();
   const timeDiff = (currentTime - state.lastUpdate) / 1000;
   const currentVideoId = player.getVideoData()?.video_id;
 
@@ -375,8 +400,11 @@ socket.on('playbackState', (state) => {
     const actualTimeDiff = (Date.now() - state.lastUpdate) / 1000;
     const targetTime = state.timestamp + (state.isPlaying ? actualTimeDiff : 0);
     
-    // Always seek to the target position when paused or if difference is significant
-    if (!state.isPlaying || Math.abs(player.getCurrentTime() - targetTime) > 2) {
+    const currentTime = player.getCurrentTime();
+    const timeDifference = Math.abs(currentTime - targetTime);
+    
+    // Only seek if the difference is significant
+    if (timeDifference > 2) {
       player.seekTo(targetTime, true);
     }
 
@@ -437,4 +465,9 @@ socket.on('connect_error', (error) => {
 
 socket.on('connect_timeout', (timeout) => {
   console.error('Socket connection timeout:', timeout);
+});
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+  if (syncInterval) clearInterval(syncInterval);
 });
