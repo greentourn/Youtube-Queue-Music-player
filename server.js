@@ -51,16 +51,16 @@ io.on('connection', (socket) => {
       ...state,
       lastUpdate: Date.now()
     };
-    socket.broadcast.emit('playbackState', currentPlaybackState);
+    socket.broadcast.emit('playbackState', currentPlaybackState)
   });
 
   socket.on('addSong', (song) => {
     songQueue.push(song);
     io.emit('queueUpdated', songQueue);
 
-    // If this is the first song, start playing for everyone
-    if (songQueue.length === 1) {
-      const videoId = extractVideoId(songQueue[0]);
+    // If no song is currently playing, start the new song
+    if (!currentPlaybackState.videoId || !currentPlaybackState.isPlaying) {
+      const videoId = extractVideoId(song);
       currentPlaybackState = {
         videoId,
         timestamp: 0,

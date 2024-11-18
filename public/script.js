@@ -53,13 +53,7 @@ function onPlayerStateChange(event) {
     switch(event.data) {
       case YT.PlayerState.PLAYING:
       case YT.PlayerState.PAUSED:
-        const state = {
-          videoId: player.getVideoData().video_id,
-          timestamp: player.getCurrentTime(),
-          isPlaying: event.data === YT.PlayerState.PLAYING
-        };
-        lastKnownState = state;
-        socket.emit('updatePlaybackState', state);
+        broadcastCurrentState();
         break;
       
       case YT.PlayerState.ENDED:
@@ -131,35 +125,30 @@ async function onPlayerReady(event) {
   }
 }
 
-function onPlayerStateChange(event) {
-  if (isProcessingStateUpdate) return;
-
-  if (!isInitialSync) {
-    switch(event.data) {
-      case YT.PlayerState.PLAYING:
-      case YT.PlayerState.PAUSED:
-        broadcastCurrentState();
-        break;
-      
-      case YT.PlayerState.ENDED:
-        handleVideoEnded();
-        break;
-    }
-  }
-}
-
 function handleVideoEnded() {
   if (songQueue.length > 1) {
     socket.emit('skipSong');
   } else {
+    // Clear queue and reset state
+    socket.emit('skipSong');  // This will trigger server-side queue update
+    
+    // Don't need to manually update these as they'll be updated via socket events
+    songQueue = [];
     const state = {
-      videoId: player.getVideoData().video_id,
+      videoId: null,
       timestamp: 0,
-      isPlaying: false
+      isPlaying: false,
+      lastUpdate: Date.now()
     };
-    socket.emit('updatePlaybackState', state);
+    lastKnownState = state;
+    isSongPlaying = false;
+    
+    // Update title
+    const nowPlayingTitle = document.getElementById('nowPlaying');
+    nowPlayingTitle.textContent = 'ไม่มีเพลง';
   }
 }
+
 
 function playNextSong() {
   if (songQueue.length > 0 && player && typeof player.loadVideoById === 'function') {
@@ -443,17 +432,37 @@ socket.on('playbackState', (state) => {
 socket.on('queueUpdated', (queue) => {
   updateQueue(queue);
   
-  if (queue.length === 1) {
+  // ตรวจสอบว่าไม่มีเพลงเล่นอยู่ และมีเพลงในคิว
+  if ((!lastKnownState?.videoId || !lastKnownState?.isPlaying) && queue.length > 0) {
     const videoId = extractVideoId(queue[0]);
     if (videoId) {
-      // เมื่อเพิ่มเพลงแรก ให้ทุก client เริ่มเล่นพร้อมกัน
       const state = {
         videoId: videoId,
         timestamp: 0,
         isPlaying: true,
         lastUpdate: Date.now()
       };
-      socket.emit('updatePlaybackState', state);
+      lastKnownState = state;
+      isSongPlaying = true;
+      
+      // โหลดและเล่นวิดีโอใหม่
+      if (player && player.loadVideoById) {
+        isProcessingStateUpdate = true;
+        player.loadVideoById({
+          videoId: videoId,
+          startSeconds: 0
+        });
+        
+        // รอให้วิดีโอโหลดเสร็จก่อนเล่น
+        const checkState = setInterval(() => {
+          if (player.getPlayerState() !== YT.PlayerState.BUFFERING) {
+            clearInterval(checkState);
+            player.playVideo();
+            socket.emit('updatePlaybackState', state);
+            isProcessingStateUpdate = false;
+          }
+        }, 100);
+      }
     }
   }
 });
