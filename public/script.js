@@ -9,7 +9,7 @@ let lastKnownState = null;
 let lastStateUpdate = Date.now();
 let syncInterval;
 
-function showPlaylistModal(videos) {
+function showPlaylistModal(videos, originalVideo) {
   const modalHtml = `
     <div class="modal fade" id="playlistModal" tabindex="-1">
       <div class="modal-dialog">
@@ -19,17 +19,21 @@ function showPlaylistModal(videos) {
             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
-            <p>ลิงค์ของคุณเป็น playlist คุณต้องการเพิ่มเพลงจาก playlist นี้อย่างไร?</p>
+            <p>คุณต้องการเพิ่มเพลงจาก playlist นี้อย่างไร?</p>
+            <p class="text-muted small">หมายเหตุ: การเพิ่มทุกเพลงจะเริ่มจากเพลงที่คุณเลือก และเพิ่มเพลงที่เหลือตามลำดับใน playlist</p>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
-            <button type="button" class="btn btn-primary" id="addFirstVideo">เพิ่มเพลงแรกเท่านั้น</button>
-            <button type="button" class="btn btn-success" id="addAllVideos">เพิ่มทุกเพลงใน Playlist</button>
+            <button type="button" class="btn btn-primary" id="addFirstVideo">เพิ่มเพลงที่เลือกมา</button>
+            <button type="button" class="btn btn-success" id="addAllVideos">
+              เพิ่มทุกเพลง (${videos.length} เพลง)
+            </button>
           </div>
         </div>
       </div>
     </div>
   `;
+
   // เพิ่ม modal เข้าไปใน DOM
   const modalWrapper = document.createElement('div');
   modalWrapper.innerHTML = modalHtml;
@@ -40,7 +44,7 @@ function showPlaylistModal(videos) {
 
   // เพิ่ม event listeners
   document.getElementById('addFirstVideo').onclick = () => {
-    socket.emit('addPlaylistVideos', [videos[0]]);
+    socket.emit('addPlaylistVideos', [originalVideo]);
     modal.hide();
     modalWrapper.remove();
   };
@@ -54,7 +58,6 @@ function showPlaylistModal(videos) {
   // แสดง modal
   modal.show();
 }
-
 
 function onYouTubeIframeAPIReady() {
   player = new YT.Player('player', {
@@ -274,8 +277,8 @@ function addSong() {
   }
 }
 
-socket.on('playlistFound', ({ videos }) => {
-  showPlaylistModal(videos);
+socket.on('playlistFound', ({ videos, originalVideo }) => {
+  showPlaylistModal(videos, originalVideo);
 });
 
 function skipSong() {

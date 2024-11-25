@@ -58,23 +58,34 @@ io.on('connection', (socket) => {
     const videoId = extractVideoId(input);
     const playlistId = extractPlaylistId(input);
 
-    if (playlistId) {
+    if (playlistId && videoId) {
       try {
         const apiKey = process.env.YOUTUBE_API_KEY;
         const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}`;
         const response = await axios.get(url);
-        const videos = response.data.items.map(item =>
-          `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`
+
+        // หา index ของวิดีโอที่ user เลือกใน playlist
+        let startIndex = response.data.items.findIndex(
+          item => item.snippet.resourceId.videoId === videoId
         );
 
-        // ส่งข้อมูล playlist กลับไปให้ client เลือก
+        if (startIndex === -1) startIndex = 0;
+
+        // สร้าง array ของวิดีโอโดยเริ่มจากวิดีโอที่เลือก
+        const videos = [
+          ...response.data.items.slice(startIndex),
+          ...response.data.items.slice(0, startIndex)
+        ].map(item => `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`);
+
+        // ส่งข้อมูล playlist และ originalVideo กลับไปให้ client เลือก
         socket.emit('playlistFound', {
           videos,
-          playlistId
+          playlistId,
+          originalVideo: input
         });
       } catch (error) {
         console.error('Error fetching playlist:', error);
-        // ถ้าเกิดข้อผิดพลาด ให้พยายามเพิ่มเป็น single video
+        // ถ้าเกิดข้อผิดพลาด ให้เพิ่มเป็น single video
         if (videoId) {
           songQueue.push(input);
           io.emit('queueUpdated', songQueue);
