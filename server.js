@@ -191,6 +191,17 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('clearQueue', () => {
+    if (songQueue.length > 1) {
+      // เก็บเพลงที่กำลังเล่นอยู่
+      const currentSong = songQueue[0];
+      // เคลียร์คิวทั้งหมดยกเว้นเพลงที่กำลังเล่น
+      songQueue = [currentSong];
+      // แจ้งเตือนการอัพเดทคิวไปยังทุก client
+      io.emit('queueUpdated', songQueue);
+    }
+  });
+
 });
 
 

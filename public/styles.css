@@ -34,9 +34,10 @@ body {
 /* แอนิเมชันสำหรับลบ */
 .fade-out {
     opacity: 0;
-    transform: scale(0.9);
+    transform: translateY(20px);
     transition: opacity 0.3s ease, transform 0.3s ease;
 }
+
 
 /* แอนิเมชันสำหรับย้ายคิว */
 .move-up {
@@ -72,4 +73,21 @@ body {
 
 .btn-close-white {
     filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+.text-muted {
+    color: #6c757d !important;
+}
+
+
+#clearQueueBtn {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: white;
+    transition: all 0.3s ease;
+}
+
+#clearQueueBtn:hover {
+    background-color: #bb2d3b;
+    border-color: #b02a37;
 }

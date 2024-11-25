@@ -110,6 +110,24 @@ function onPlayerStateChange(event) {
   }
 }
 
+function clearQueue() {
+  const queueContainer = document.getElementById('queue');
+  const queueItems = queueContainer.querySelectorAll('.list-group-item');
+
+  // ถ้ามีเพลงในคิวมากกว่า 1 เพลง (นับรวมเพลงที่กำลังเล่น)
+  if (queueItems.length > 0) {
+    // เพิ่ม animation fade-out ให้กับทุกเพลงในคิว
+    queueItems.forEach((item) => {
+      item.classList.add('fade-out');
+    });
+
+    // รอให้ animation เสร็จสิ้นก่อนส่ง event ไปยัง server
+    setTimeout(() => {
+      socket.emit('clearQueue');
+    }, 300);
+  }
+}
+
 // เพิ่มฟังก์ชันติดตามการเปลี่ยนแปลง timestamp
 setInterval(() => {
   if (!isProcessingStateUpdate && player && player.getPlayerState() === YT.PlayerState.PAUSED) {
@@ -380,9 +398,68 @@ function updateQueue(queue) {
   });
 }
 
+function showClearQueueModal() {
+  const modalHtml = `
+    <div class="modal fade" id="clearQueueModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content bg-dark text-white">
+          <div class="modal-header">
+            <h5 class="modal-title">ยืนยันการเคลียร์คิว</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <p>คุณแน่ใจหรือไม่ที่จะเคลียร์คิวเพลงทั้งหมด?</p>
+            <small class="text-muted">เพลงที่กำลังเล่นอยู่จะไม่ถูกลบ</small>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+            <button type="button" class="btn btn-danger" id="confirmClearQueue">ยืนยันการเคลียร์</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // เพิ่ม modal เข้าไปใน DOM
+  const modalWrapper = document.createElement('div');
+  modalWrapper.innerHTML = modalHtml;
+  document.body.appendChild(modalWrapper);
+
+  // สร้าง Modal object
+  const modal = new bootstrap.Modal(document.getElementById('clearQueueModal'));
+
+  // เพิ่ม event listener สำหรับปุ่มยืนยัน
+  document.getElementById('confirmClearQueue').onclick = () => {
+    const queueContainer = document.getElementById('queue');
+    const queueItems = queueContainer.querySelectorAll('.list-group-item');
+
+    if (queueItems.length > 0) {
+      queueItems.forEach((item) => {
+        item.classList.add('fade-out');
+      });
+
+      setTimeout(() => {
+        socket.emit('clearQueue');
+      }, 300);
+    }
+
+    modal.hide();
+    modalWrapper.remove();
+  };
+
+  // เพิ่ม event listener สำหรับการลบ modal เมื่อถูกปิด
+  document.getElementById('clearQueueModal').addEventListener('hidden.bs.modal', () => {
+    modalWrapper.remove();
+  });
+
+  // แสดง modal
+  modal.show();
+}
+
 socket.on('connect', () => {
   console.log('Connected to server');
   document.getElementById('addSongButton').addEventListener('click', addSong);
+  document.getElementById('clearQueueBtn').addEventListener('click', showClearQueueModal);
 
   // เพิ่ม event listener สำหรับการกด Enter ที่ช่อง input
   document.getElementById('songInput').addEventListener('keypress', (event) => {
