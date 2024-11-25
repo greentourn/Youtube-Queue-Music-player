@@ -54,20 +54,56 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('playbackState', currentPlaybackState)
   });
 
-  socket.on('addSong', (song) => {
-    songQueue.push(song);
-    io.emit('queueUpdated', songQueue);
+  socket.on('addSong', async (input) => {
+    const videoId = extractVideoId(input);
+    const playlistId = extractPlaylistId(input);
 
-    // If no song is currently playing, start the new song
-    if (!currentPlaybackState.videoId || !currentPlaybackState.isPlaying) {
-      const videoId = extractVideoId(song);
-      currentPlaybackState = {
-        videoId,
-        timestamp: 0,
-        isPlaying: true,
-        lastUpdate: Date.now()
-      };
-      io.emit('playbackState', currentPlaybackState);
+    if (playlistId) {
+      try {
+        const apiKey = process.env.YOUTUBE_API_KEY;
+        const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}`;
+        const response = await axios.get(url);
+        const videos = response.data.items.map(item =>
+          `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`
+        );
+
+        // ส่งข้อมูล playlist กลับไปให้ client เลือก
+        socket.emit('playlistFound', {
+          videos,
+          playlistId
+        });
+      } catch (error) {
+        console.error('Error fetching playlist:', error);
+        // ถ้าเกิดข้อผิดพลาด ให้พยายามเพิ่มเป็น single video
+        if (videoId) {
+          songQueue.push(input);
+          io.emit('queueUpdated', songQueue);
+
+          if (!currentPlaybackState.videoId || !currentPlaybackState.isPlaying) {
+            currentPlaybackState = {
+              videoId,
+              timestamp: 0,
+              isPlaying: true,
+              lastUpdate: Date.now()
+            };
+            io.emit('playbackState', currentPlaybackState);
+          }
+        }
+      }
+    } else if (videoId) {
+      // กรณีเป็น single video ใช้โค้ดเดิม
+      songQueue.push(input);
+      io.emit('queueUpdated', songQueue);
+
+      if (!currentPlaybackState.videoId || !currentPlaybackState.isPlaying) {
+        currentPlaybackState = {
+          videoId,
+          timestamp: 0,
+          isPlaying: true,
+          lastUpdate: Date.now()
+        };
+        io.emit('playbackState', currentPlaybackState);
+      }
     }
   });
 
@@ -135,12 +171,61 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('addPlaylistVideos', (videos) => {
+    videos.forEach(video => {
+      songQueue.push(video);
+    });
+    io.emit('queueUpdated', songQueue);
+
+    if (!currentPlaybackState.videoId || !currentPlaybackState.isPlaying) {
+      const firstVideoId = extractVideoId(videos[0]);
+      if (firstVideoId) {
+        currentPlaybackState = {
+          videoId: firstVideoId,
+          timestamp: 0,
+          isPlaying: true,
+          lastUpdate: Date.now()
+        };
+        io.emit('playbackState', currentPlaybackState);
+      }
+    }
+  });
+
 });
 
 
 function extractVideoId(url) {
   const videoIdMatch = url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
   return videoIdMatch ? videoIdMatch[1] : null;
+}
+
+app.get('/playlist-info/:playlistId', async (req, res) => {
+  const playlistId = req.params.playlistId;
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}`;
+
+  try {
+    const response = await axios.get(url);
+    const items = response.data.items.map(item => ({
+      title: item.snippet.title,
+      videoId: item.snippet.resourceId.videoId,
+      thumbnail: item.snippet.thumbnails.default.url
+    }));
+    res.json(items);
+  } catch (error) {
+    res.status(500).send('Error retrieving playlist details');
+  }
+});
+
+// ปรับปรุงฟังก์ชัน extractVideoId ให้รองรับการแยก playlistId
+function extractVideoId(url) {
+  const videoIdMatch = url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  return videoIdMatch ? videoIdMatch[1] : null;
+}
+
+function extractPlaylistId(url) {
+  const playlistMatch = url.match(/[&?]list=([a-zA-Z0-9_-]+)/i);
+  return playlistMatch ? playlistMatch[1] : null;
 }
 
 server.listen(3000, () => {

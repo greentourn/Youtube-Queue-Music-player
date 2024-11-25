@@ -9,6 +9,53 @@ let lastKnownState = null;
 let lastStateUpdate = Date.now();
 let syncInterval;
 
+function showPlaylistModal(videos) {
+  const modalHtml = `
+    <div class="modal fade" id="playlistModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content bg-dark text-white">
+          <div class="modal-header">
+            <h5 class="modal-title">พบ Playlist</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <p>ลิงค์ของคุณเป็น playlist คุณต้องการเพิ่มเพลงจาก playlist นี้อย่างไร?</p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+            <button type="button" class="btn btn-primary" id="addFirstVideo">เพิ่มเพลงแรกเท่านั้น</button>
+            <button type="button" class="btn btn-success" id="addAllVideos">เพิ่มทุกเพลงใน Playlist</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  // เพิ่ม modal เข้าไปใน DOM
+  const modalWrapper = document.createElement('div');
+  modalWrapper.innerHTML = modalHtml;
+  document.body.appendChild(modalWrapper);
+
+  // สร้าง Modal object
+  const modal = new bootstrap.Modal(document.getElementById('playlistModal'));
+
+  // เพิ่ม event listeners
+  document.getElementById('addFirstVideo').onclick = () => {
+    socket.emit('addPlaylistVideos', [videos[0]]);
+    modal.hide();
+    modalWrapper.remove();
+  };
+
+  document.getElementById('addAllVideos').onclick = () => {
+    socket.emit('addPlaylistVideos', videos);
+    modal.hide();
+    modalWrapper.remove();
+  };
+
+  // แสดง modal
+  modal.show();
+}
+
+
 function onYouTubeIframeAPIReady() {
   player = new YT.Player('player', {
     height: '480px',
@@ -208,6 +255,10 @@ function addSong() {
     songInput.value = '';
   }
 }
+
+socket.on('playlistFound', ({ videos }) => {
+  showPlaylistModal(videos);
+});
 
 function skipSong() {
   socket.emit('skipSong');
