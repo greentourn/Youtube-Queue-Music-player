@@ -215,12 +215,10 @@ io.on('connection', (socket) => {
 
   socket.on('playSongFromQueue', (index) => {
     if (index >= 0 && index < songQueue.length) {
-      // เก็บเพลงที่จะเล่น
+      // ดึงเพลงที่จะเล่นออกจากคิว
       const songToPlay = songQueue[index];
       // ลบเพลงออกจากคิว
       songQueue.splice(index, 1);
-      // ใส่เพลงไว้ที่ตำแหน่งแรก
-      songQueue.unshift(songToPlay);
 
       // อัพเดทคิวและเริ่มเล่นเพลง
       io.emit('queueUpdated', songQueue);

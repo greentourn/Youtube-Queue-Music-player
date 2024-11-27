@@ -198,14 +198,20 @@ async function onPlayerReady(event) {
 }
 
 function handleVideoEnded() {
-  if (songQueue.length > 1) {
-    socket.emit('skipSong');
+  if (songQueue.length > 0) {
+    // เมื่อเพลงจบ ให้เล่นเพลงแรกในคิว
+    const nextVideoId = extractVideoId(songQueue[0]);
+    if (nextVideoId) {
+      currentPlaybackState = {
+        videoId: nextVideoId,
+        timestamp: 0,
+        isPlaying: true,
+        lastUpdate: Date.now()
+      };
+      socket.emit('skipSong'); // จะทำให้เพลงแรกถูกลบออกจากคิวและอัพเดทสถานะ
+    }
   } else {
-    // Clear queue and reset state
-    socket.emit('skipSong');  // This will trigger server-side queue update
-    
-    // Don't need to manually update these as they'll be updated via socket events
-    songQueue = [];
+    // ถ้าไม่มีเพลงในคิว รีเซ็ตสถานะ
     const state = {
       videoId: null,
       timestamp: 0,
@@ -214,8 +220,9 @@ function handleVideoEnded() {
     };
     lastKnownState = state;
     isSongPlaying = false;
-    
-    // Update title
+    socket.emit('updatePlaybackState', state);
+
+    // อัพเดทชื่อเพลง
     const nowPlayingTitle = document.getElementById('nowPlaying');
     nowPlayingTitle.textContent = 'ไม่มีเพลง';
   }
@@ -315,7 +322,6 @@ function extractVideoId(url) {
   const videoIdMatch = url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
   return videoIdMatch ? videoIdMatch[1] : null;
 }
-
 function updateQueue(queue) {
   songQueue = queue;
   const queueList = document.getElementById('queue');
@@ -349,12 +355,24 @@ function updateQueue(queue) {
       (videoDetails) => {
         listItem.removeChild(loadingIndicator);
 
-        // เพิ่มปุ่ม Play
+        // สร้างปุ่ม Play พร้อม tooltip
+        const playButtonContainer = document.createElement('div');
+        playButtonContainer.className = 'play-button-container';
+
         const playButton = document.createElement('button');
         playButton.innerHTML = '▶️';
         playButton.className = 'btn btn-link btn-sm play-button';
-        playButton.title = 'เล่นเพลงนี้';
-        playButton.onclick = () => playSongFromQueue(index);
+        playButton.title = 'เล่นเพลงนี้ทันที';
+        playButton.onclick = () => {
+          // เพิ่ม animation เมื่อคลิก
+          playButton.classList.add('play-button-clicked');
+          setTimeout(() => {
+            playButton.classList.remove('play-button-clicked');
+            playSongFromQueue(index);
+          }, 200);
+        };
+
+        playButtonContainer.appendChild(playButton);
 
         const title = videoDetails.title;
         const thumbnail = videoDetails.thumbnails.default.url;
@@ -396,7 +414,7 @@ function updateQueue(queue) {
         controlsElement.appendChild(downButton);
         controlsElement.appendChild(removeButton);
 
-        listItem.appendChild(playButton);
+        listItem.appendChild(playButtonContainer);
         listItem.appendChild(thumbnailImg);
         listItem.appendChild(titleText);
         listItem.appendChild(controlsElement);
