@@ -213,6 +213,28 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('playSongFromQueue', (index) => {
+    if (index >= 0 && index < songQueue.length) {
+      // เก็บเพลงที่จะเล่น
+      const songToPlay = songQueue[index];
+      // ลบเพลงออกจากคิว
+      songQueue.splice(index, 1);
+      // ใส่เพลงไว้ที่ตำแหน่งแรก
+      songQueue.unshift(songToPlay);
+
+      // อัพเดทคิวและเริ่มเล่นเพลง
+      io.emit('queueUpdated', songQueue);
+      const videoId = extractVideoId(songToPlay);
+      currentPlaybackState = {
+        videoId: videoId,
+        timestamp: 0,
+        isPlaying: true,
+        lastUpdate: Date.now()
+      };
+      io.emit('playbackState', currentPlaybackState);
+    }
+  });
+
 });
 
 

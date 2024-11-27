@@ -131,6 +131,10 @@ function clearQueue() {
   }
 }
 
+function playSongFromQueue(index) {
+  socket.emit('playSongFromQueue', index);
+}
+
 // เพิ่มฟังก์ชันติดตามการเปลี่ยนแปลง timestamp
 setInterval(() => {
   if (!isProcessingStateUpdate && player && player.getPlayerState() === YT.PlayerState.PAUSED) {
@@ -345,6 +349,13 @@ function updateQueue(queue) {
       (videoDetails) => {
         listItem.removeChild(loadingIndicator);
 
+        // เพิ่มปุ่ม Play
+        const playButton = document.createElement('button');
+        playButton.innerHTML = '▶️';
+        playButton.className = 'btn btn-link btn-sm play-button';
+        playButton.title = 'เล่นเพลงนี้';
+        playButton.onclick = () => playSongFromQueue(index);
+
         const title = videoDetails.title;
         const thumbnail = videoDetails.thumbnails.default.url;
 
@@ -385,6 +396,7 @@ function updateQueue(queue) {
         controlsElement.appendChild(downButton);
         controlsElement.appendChild(removeButton);
 
+        listItem.appendChild(playButton);
         listItem.appendChild(thumbnailImg);
         listItem.appendChild(titleText);
         listItem.appendChild(controlsElement);

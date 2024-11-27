@@ -91,3 +91,19 @@ body {
     background-color: #bb2d3b;
     border-color: #b02a37;
 }
+
+.play-button {
+    padding: 0 5px;
+    margin-right: 8px;
+    font-size: 1.2em;
+    color: #ffffff;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.play-button:hover {
+    transform: scale(1.2);
+    color: #1db954;
+}
