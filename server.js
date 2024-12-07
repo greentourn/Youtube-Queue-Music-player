@@ -512,7 +512,7 @@ ${currentSong ? `- กำลังเล่น: ${currentSong.title}` : '- ไ�
         },
         ...messages
       ],
-      max_tokens: 150
+      max_tokens: 500
     });
 
     return completion.choices[0].message.content;
