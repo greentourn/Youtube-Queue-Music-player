@@ -77,15 +77,18 @@ function onYouTubeIframeAPIReady() {
 
 function broadcastCurrentState() {
   if (!isProcessingStateUpdate && player && player.getCurrentTime) {
-    const state = {
+    const currentState = {
       videoId: player.getVideoData()?.video_id,
       timestamp: player.getCurrentTime(),
-      isPlaying: player.getPlayerState() === YT.PlayerState.PLAYING
+      isPlaying: player.getPlayerState() === YT.PlayerState.PLAYING,
+      lastUpdate: Date.now()
     };
-    lastKnownState = state;
-    socket.emit('updatePlaybackState', state);
+    lastKnownState = currentState;
+    socket.emit('updatePlaybackState', currentState);
   }
 }
+
+
 // Sync state every 1 seconds if playing
 function startStateSync() {
   if (syncInterval) clearInterval(syncInterval);
@@ -223,57 +226,6 @@ function handleVideoEnded() {
     socket.emit('updatePlaybackState', state);
 
     // อัพเดทชื่อเพลง
-    const nowPlayingTitle = document.getElementById('nowPlaying');
-    nowPlayingTitle.textContent = 'ไม่มีเพลง';
-  }
-}
-
-
-function playNextSong() {
-  if (songQueue.length > 0 && player && typeof player.loadVideoById === 'function') {
-    const nextSong = songQueue[0];
-    const videoId = extractVideoId(nextSong);
-
-    if (!videoId) {
-      console.error('Invalid video ID');
-      skipSong();
-      return;
-    }
-
-    const state = {
-      videoId: videoId,
-      timestamp: 0,
-      isPlaying: true
-    };
-
-    isProcessingStateUpdate = true;
-    player.loadVideoById({
-      videoId: videoId,
-      startSeconds: 0
-    });
-
-    const checkState = setInterval(() => {
-      if (player.getPlayerState() !== YT.PlayerState.BUFFERING) {
-        clearInterval(checkState);
-        socket.emit('updatePlaybackState', state);
-        player.playVideo();
-        isProcessingStateUpdate = false;
-      }
-    }, 100);
-
-    isSongPlaying = true;
-    currentPlayingIndex = 0;
-
-    fetchVideoDetails(videoId, (videoDetails) => {
-      const nowPlayingTitle = document.getElementById('nowPlaying');
-      nowPlayingTitle.textContent = `กำลังเล่น: ${videoDetails.title}`;
-    });
-  } else {
-    isSongPlaying = false;
-    currentPlayingIndex = -1;
-    if (player && typeof player.stopVideo === 'function') {
-      player.stopVideo();
-    }
     const nowPlayingTitle = document.getElementById('nowPlaying');
     nowPlayingTitle.textContent = 'ไม่มีเพลง';
   }
@@ -534,33 +486,35 @@ socket.on('initialState', ({ songQueue: initialQueue, currentPlaybackState }) =>
 
 socket.on('playbackState', (state) => {
   if (!player || !player.loadVideoById) return;
-  
+
   const currentTime = Date.now();
-  // Ignore old state updates
+  // ไม่รับ state ที่เก่ากว่า state ปัจจุบัน
   if (state.lastUpdate < lastStateUpdate) return;
   lastStateUpdate = state.lastUpdate;
-  
+
   isProcessingStateUpdate = true;
   lastKnownState = state;
-  
+
   const timeDiff = (currentTime - state.lastUpdate) / 1000;
   const currentVideoId = player.getVideoData()?.video_id;
 
   const handlePlayback = () => {
-    const actualTimeDiff = (Date.now() - state.lastUpdate) / 1000;
-    const targetTime = state.timestamp + (state.isPlaying ? actualTimeDiff : 0);
-    
+    // คำนวณ targetTime ใหม่ โดยคำนึงถึงสถานะการเล่น
+    const targetTime = state.isPlaying ?
+      state.timestamp + ((Date.now() - state.lastUpdate) / 1000) :
+      state.timestamp;
+
     const currentTime = player.getCurrentTime();
     const timeDifference = Math.abs(currentTime - targetTime);
-    
-    // Only seek if the difference is significant
-    if (timeDifference > 2) {
+
+    // ปรับ timestamp ถ้ามีความต่างมากกว่า 1 วินาที
+    if (timeDifference > 1) {
       player.seekTo(targetTime, true);
     }
 
-    if (state.isPlaying) {
+    if (state.isPlaying && player.getPlayerState() !== YT.PlayerState.PLAYING) {
       player.playVideo();
-    } else {
+    } else if (!state.isPlaying && player.getPlayerState() === YT.PlayerState.PLAYING) {
       player.pauseVideo();
     }
   };
@@ -640,4 +594,242 @@ socket.on('connect_timeout', (timeout) => {
 // Clean up on page unload
 window.addEventListener('beforeunload', () => {
   if (syncInterval) clearInterval(syncInterval);
+});
+
+
+// ปรับปรุงฟังก์ชัน showSearchResults
+function showSearchResults(results, message) {
+  const chatMessages = document.getElementById('chatMessages');
+  if (!chatMessages) {
+    console.error('Chat messages container not found');
+    return;
+  }
+
+  // ลบผลการค้นหาเก่า
+  const oldResults = chatMessages.querySelectorAll('.search-results');
+  oldResults.forEach(element => element.remove());
+
+  // แสดงข้อความจาก AI
+  if (message) {
+    addMessageToChat('assistant', message);
+  }
+
+  // สร้าง container สำหรับผลการค้นหา
+  const resultsContainer = document.createElement('div');
+  resultsContainer.className = 'search-results fade-in';
+
+  results.forEach(result => {
+    const resultItem = document.createElement('div');
+    resultItem.className = 'search-result-item';
+
+    // สร้าง thumbnail container
+    const thumbnailContainer = document.createElement('div');
+    thumbnailContainer.className = 'thumbnail-container';
+
+    const thumbnail = document.createElement('img');
+    thumbnail.src = result.thumbnail;
+    thumbnail.alt = result.title;
+    thumbnail.className = 'search-result-thumbnail';
+    thumbnail.style.width = '100%';
+    thumbnail.style.height = '100%';
+    thumbnail.style.objectFit = 'cover';
+
+    thumbnailContainer.appendChild(thumbnail);
+
+    // สร้าง info container
+    const infoContainer = document.createElement('div');
+    infoContainer.className = 'search-result-info';
+
+    const title = document.createElement('div');
+    title.className = 'search-result-title';
+    title.textContent = result.title;
+
+    const channel = document.createElement('div');
+    channel.className = 'search-result-channel';
+    channel.textContent = result.channel;
+
+    infoContainer.appendChild(title);
+    infoContainer.appendChild(channel);
+
+    // สร้างปุ่ม Add to Queue
+    const addButton = document.createElement('button');
+    addButton.className = 'btn btn-sm btn-primary add-to-queue-btn';
+    addButton.textContent = 'Add song';
+
+    addButton.onclick = () => {
+      addButton.disabled = true;
+      addButton.classList.add('loading');
+      addButton.textContent = 'Adding...';
+
+      const videoUrl = `https://www.youtube.com/watch?v=${result.id}`;
+      socket.emit('addSong', videoUrl);
+
+      setTimeout(() => {
+        addButton.classList.remove('loading');
+        addButton.classList.add('success');
+        addButton.textContent = 'Added!';
+
+        setTimeout(() => {
+          addButton.classList.remove('success');
+          addButton.disabled = false;
+          addButton.textContent = 'Add song';
+        }, 2000);
+      }, 500);
+    };
+
+    resultItem.appendChild(thumbnailContainer);
+    resultItem.appendChild(infoContainer);
+    resultItem.appendChild(addButton);
+
+    resultsContainer.appendChild(resultItem);
+  });
+
+  chatMessages.appendChild(resultsContainer);
+
+  // เลื่อนไปที่ผลการค้นหาล่าสุด
+  setTimeout(() => {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }, 100);
+}
+
+
+function addMessageToChat(role, message) {
+  const chatMessages = document.getElementById('chatMessages');
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `chat-message ${role}-message`;
+  messageDiv.textContent = message;
+
+  // Animation
+  messageDiv.style.opacity = '0';
+  chatMessages.appendChild(messageDiv);
+
+  setTimeout(() => {
+    messageDiv.style.opacity = '1';
+    messageDiv.style.transition = 'opacity 0.3s ease-in-out';
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }, 100);
+}
+
+function initializeChatInterface() {
+  const chatMessages = document.getElementById('chatMessages');
+  const chatInputContainer = document.querySelector('.chat-input-container');
+
+  if (!chatMessages || !chatInputContainer) {
+    console.error('Chat interface elements not found');
+    return;
+  }
+
+  // สร้าง UI elements
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'chat-input';
+  input.placeholder = 'พิมพ์เพื่อค้นหาเพลง สั่งเล่น หรือถามเกี่ยวกับเพลง...';
+
+  const sendButton = document.createElement('button');
+  sendButton.className = 'chat-submit';
+  sendButton.innerHTML = '➤';
+
+  // ล้าง container ก่อนเพิ่ม elements ใหม่
+  chatInputContainer.innerHTML = '';
+  chatInputContainer.appendChild(input);
+  chatInputContainer.appendChild(sendButton);
+
+  // ฟังก์ชันส่งข้อความ
+  function sendMessage() {
+    const message = input.value.trim();
+    if (message) {
+      addMessageToChat('user', message);
+      socket.emit('chat message', message);
+      input.value = '';
+    }
+  }
+
+  // Event listeners
+  sendButton.onclick = sendMessage;
+  input.onkeypress = (e) => {
+    if (e.key === 'Enter') {
+      sendMessage();
+    }
+  };
+
+  // แสดงข้อความต้อนรับ
+  setTimeout(() => {
+    addMessageToChat('assistant', 'สวัสดีครับ! ผมสามารถช่วยคุณค้นหาเพลง ควบคุมการเล่น และตอบคำถามเกี่ยวกับเพลงได้');
+  }, 1000);
+}
+
+
+// รับการตอบกลับจาก server
+socket.on('chat response', ({ message, isCommand }) => {
+  // แยกข้อความคำสั่งออกจากข้อความที่จะแสดง
+  const displayMessage = message.replace(/\[COMMAND:\w+(?::\d+)?\]/g, '').trim();
+  const commandMatch = message.match(/\[COMMAND:(\w+)(?::(\d+))?\]/);
+
+  if (!isCommand && displayMessage) {
+    addMessageToChat('assistant', displayMessage);
+  }
+
+  if (commandMatch) {
+    const command = commandMatch[1];
+    switch (command) {
+      case 'skip':
+        skipSong();
+        break;
+      case 'pause':
+        player.pauseVideo();
+        break;
+      case 'play':
+        player.playVideo();
+        break;
+      case 'clear':
+        clearQueue();
+        break;
+      // เพิ่มคำสั่งอื่นๆ ตามต้องการ
+    }
+  }
+});
+
+
+
+// เริ่มต้น chat interface เมื่อโหลดหน้าเว็บ
+document.addEventListener('DOMContentLoaded', () => {
+  // Initial setup
+  initializeChatInterface();
+
+  // Clear old event listeners
+  socket.off('search results');
+  socket.off('chat response');
+
+  // Register new event listeners
+  socket.on('search results', ({ results, message }) => {
+    console.log('Received search results:', results);
+    showSearchResults(results, message);
+  });
+
+  socket.on('chat response', ({ message, isCommand }) => {
+    const displayMessage = message.replace(/\[COMMAND:\w+(?::\d+)?\]/g, '').trim();
+    const commandMatch = message.match(/\[COMMAND:(\w+)(?::(\d+))?\]/);
+
+    if (!isCommand && displayMessage) {
+      addMessageToChat('assistant', displayMessage);
+    }
+
+    if (commandMatch) {
+      const command = commandMatch[1];
+      switch (command) {
+        case 'skip':
+          skipSong();
+          break;
+        case 'pause':
+          if (player && player.pauseVideo) player.pauseVideo();
+          break;
+        case 'play':
+          if (player && player.playVideo) player.playVideo();
+          break;
+        case 'clear':
+          clearQueue();
+          break;
+      }
+    }
+  });
 });

@@ -3,10 +3,17 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const axios = require('axios');
+const OpenAI = require('openai');
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
+const chatHistory = new Map();
 
 let songQueue = [];
 let currentPlaybackState = {
@@ -40,20 +47,188 @@ app.get('/current-state', (req, res) => {
 app.use(express.static('public'));
 
 io.on('connection', (socket) => {
+  // Initialize chat history for new connection
+  chatHistory.set(socket.id, []);
+
   // Send current state to new user
   socket.emit('initialState', {
     songQueue,
     currentPlaybackState
   });
 
+  // เพิ่ม socket event listener
+  socket.on('search results', ({ results, message }) => {
+    showSearchResults(results, message);
+  });
+
+  // Handle chat messages
+  socket.on('chat message', async (message) => {
+    try {
+      const currentVideoId = currentPlaybackState.videoId;
+      let currentSong = null;
+
+      if (currentVideoId) {
+        try {
+          const response = await axios.get(
+            `https://www.googleapis.com/youtube/v3/videos?id=${currentVideoId}&key=${process.env.YOUTUBE_API_KEY}&part=snippet`
+          );
+          currentSong = {
+            title: response.data.items[0].snippet.title,
+            videoId: currentVideoId
+          };
+        } catch (error) {
+          console.error('Error fetching video details:', error);
+        }
+      }
+
+      // อัพเดทประวัติแชท
+      const history = chatHistory.get(socket.id);
+      history.push({ role: "user", content: message });
+      if (history.length > 10) history.shift();
+
+      // ขอคำตอบจาก AI
+      const response = await chatWithAI(history, currentSong, songQueue);
+      history.push({ role: "assistant", content: response });
+
+      // ตรวจสอบคำสั่งควบคุม
+      const commandMatch = response.match(/\[COMMAND:(\w+)(?::(\d+))?\]/);
+      if (commandMatch) {
+        const command = commandMatch[1];
+        const param = commandMatch[2];
+
+        // จัดการคำสั่งโดยตรง
+        switch (command) {
+          case 'play':
+            if (!currentPlaybackState.isPlaying && currentPlaybackState.videoId) {
+              currentPlaybackState = {
+                ...currentPlaybackState,
+                isPlaying: true,
+                lastUpdate: Date.now()
+              };
+              io.emit('playbackState', currentPlaybackState);
+            }
+            break;
+
+          case 'pause':
+            if (currentPlaybackState.isPlaying) {
+              // อัพเดท timestamp ให้ตรงกับเวลาที่หยุด
+              const currentTime = Date.now();
+              const timeDiff = (currentTime - currentPlaybackState.lastUpdate) / 1000;
+              currentPlaybackState = {
+                ...currentPlaybackState,
+                timestamp: currentPlaybackState.timestamp + (currentPlaybackState.isPlaying ? timeDiff : 0),
+                isPlaying: false,
+                lastUpdate: currentTime
+              };
+              io.emit('playbackState', currentPlaybackState);
+            }
+            break;
+
+          case 'skip':
+            if (songQueue.length > 0) {
+              // ลบเพลงปัจจุบันออกจากคิว
+              songQueue.shift();
+              io.emit('queueUpdated', songQueue);
+
+              if (songQueue.length > 0) {
+                // ถ้ายังมีเพลงในคิว ให้เล่นเพลงถัดไปทันที
+                const nextVideoId = extractVideoId(songQueue[0]);
+                currentPlaybackState = {
+                  videoId: nextVideoId,
+                  timestamp: 0,
+                  isPlaying: true,
+                  lastUpdate: Date.now()
+                };
+              } else {
+                // ถ้าไม่มีเพลงในคิวแล้ว
+                currentPlaybackState = {
+                  videoId: null,
+                  timestamp: 0,
+                  isPlaying: false,
+                  lastUpdate: Date.now()
+                };
+              }
+              // ส่ง state ใหม่ไปที่ client ทันที
+              io.emit('playbackState', currentPlaybackState);
+            }
+            break;
+
+          case 'clear':
+            if (songQueue.length > 1) {
+              const currentSong = songQueue[0];
+              songQueue = [currentSong];
+              io.emit('queueUpdated', songQueue);
+            }
+            break;
+
+          case 'remove':
+            if (param && Number(param) > 0 && Number(param) < songQueue.length) {
+              songQueue.splice(Number(param), 1);
+              io.emit('queueUpdated', songQueue);
+            }
+            break;
+        }
+
+        socket.emit('chat response', {
+          message: response.replace(/\[COMMAND:\w+(?::\d+)?\]/g, '').trim(),
+          isCommand: true
+        });
+        return;
+      }
+
+      // ตรวจสอบคำสั่งค้นหา
+      const searchMatch = response.match(/\[SEARCH:(.*?)\]/);
+      if (searchMatch) {
+        const searchQuery = searchMatch[1].trim();
+        try {
+          const searchResults = await searchYouTubeVideos(searchQuery);
+          if (searchResults.length > 0) {
+            socket.emit('search results', {
+              results: searchResults,
+              message: response.replace(/\[SEARCH:.*?\]/, '').trim()
+            });
+          } else {
+            socket.emit('chat response', {
+              message: "ขออภัย ฉันไม่พบเพลงที่คุณต้องการ กรุณาลองใหม่อีกครั้ง",
+              isCommand: false
+            });
+          }
+          return;
+        } catch (error) {
+          console.error('Error searching videos:', error);
+          socket.emit('chat response', {
+            message: "ขออภัย เกิดข้อผิดพลาดในการค้นหาเพลง กรุณาลองใหม่อีกครั้ง",
+            isCommand: false
+          });
+        }
+        return;
+      }
+
+      // ส่งข้อความปกติ
+      socket.emit('chat response', {
+        message: response,
+        isCommand: false
+      });
+
+    } catch (error) {
+      console.error('Error processing chat:', error);
+      socket.emit('chat response', {
+        message: "ขออภัย เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง",
+        isCommand: false
+      });
+    }
+  });
+
+  // Handle playback state updates
   socket.on('updatePlaybackState', (state) => {
     currentPlaybackState = {
       ...state,
       lastUpdate: Date.now()
     };
-    socket.broadcast.emit('playbackState', currentPlaybackState)
+    socket.broadcast.emit('playbackState', currentPlaybackState);
   });
 
+  // Handle adding songs
   socket.on('addSong', async (input) => {
     const videoId = extractVideoId(input);
     const playlistId = extractPlaylistId(input);
@@ -64,20 +239,17 @@ io.on('connection', (socket) => {
         const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}`;
         const response = await axios.get(url);
 
-        // หา index ของวิดีโอที่ user เลือกใน playlist
         let startIndex = response.data.items.findIndex(
           item => item.snippet.resourceId.videoId === videoId
         );
 
         if (startIndex === -1) startIndex = 0;
 
-        // สร้าง array ของวิดีโอโดยเริ่มจากวิดีโอที่เลือก
         const videos = [
           ...response.data.items.slice(startIndex),
           ...response.data.items.slice(0, startIndex)
         ].map(item => `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`);
 
-        // ส่งข้อมูล playlist และ originalVideo กลับไปให้ client เลือก
         socket.emit('playlistFound', {
           videos,
           playlistId,
@@ -85,7 +257,6 @@ io.on('connection', (socket) => {
         });
       } catch (error) {
         console.error('Error fetching playlist:', error);
-        // ถ้าเกิดข้อผิดพลาด ให้เพิ่มเป็น single video
         if (videoId) {
           songQueue.push(input);
           io.emit('queueUpdated', songQueue);
@@ -102,7 +273,6 @@ io.on('connection', (socket) => {
         }
       }
     } else if (videoId) {
-      // กรณีเป็น single video ใช้โค้ดเดิม
       songQueue.push(input);
       io.emit('queueUpdated', songQueue);
 
@@ -118,6 +288,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle skipping songs
   socket.on('skipSong', () => {
     if (songQueue.length > 0) {
       songQueue.shift();
@@ -144,6 +315,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle removing songs
   socket.on('removeSong', (index) => {
     if (index >= 0 && index < songQueue.length) {
       songQueue.splice(index, 1);
@@ -171,6 +343,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle moving songs in queue
   socket.on('moveSong', (fromIndex, toIndex) => {
     if (
       fromIndex >= 0 && fromIndex < songQueue.length &&
@@ -182,6 +355,7 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle adding playlist videos
   socket.on('addPlaylistVideos', (videos) => {
     videos.forEach(video => {
       songQueue.push(video);
@@ -202,25 +376,21 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle clearing queue
   socket.on('clearQueue', () => {
     if (songQueue.length > 1) {
-      // เก็บเพลงที่กำลังเล่นอยู่
       const currentSong = songQueue[0];
-      // เคลียร์คิวทั้งหมดยกเว้นเพลงที่กำลังเล่น
       songQueue = [currentSong];
-      // แจ้งเตือนการอัพเดทคิวไปยังทุก client
       io.emit('queueUpdated', songQueue);
     }
   });
 
+  // Handle playing song from queue
   socket.on('playSongFromQueue', (index) => {
     if (index >= 0 && index < songQueue.length) {
-      // ดึงเพลงที่จะเล่นออกจากคิว
       const songToPlay = songQueue[index];
-      // ลบเพลงออกจากคิว
       songQueue.splice(index, 1);
 
-      // อัพเดทคิวและเริ่มเล่นเพลง
       io.emit('queueUpdated', songQueue);
       const videoId = extractVideoId(songToPlay);
       currentPlaybackState = {
@@ -233,30 +403,10 @@ io.on('connection', (socket) => {
     }
   });
 
-});
-
-
-function extractVideoId(url) {
-  const videoIdMatch = url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-  return videoIdMatch ? videoIdMatch[1] : null;
-}
-
-app.get('/playlist-info/:playlistId', async (req, res) => {
-  const playlistId = req.params.playlistId;
-  const apiKey = process.env.YOUTUBE_API_KEY;
-  const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}`;
-
-  try {
-    const response = await axios.get(url);
-    const items = response.data.items.map(item => ({
-      title: item.snippet.title,
-      videoId: item.snippet.resourceId.videoId,
-      thumbnail: item.snippet.thumbnails.default.url
-    }));
-    res.json(items);
-  } catch (error) {
-    res.status(500).send('Error retrieving playlist details');
-  }
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    chatHistory.delete(socket.id);
+  });
 });
 
 // ปรับปรุงฟังก์ชัน extractVideoId ให้รองรับการแยก playlistId
@@ -269,6 +419,109 @@ function extractPlaylistId(url) {
   const playlistMatch = url.match(/[&?]list=([a-zA-Z0-9_-]+)/i);
   return playlistMatch ? playlistMatch[1] : null;
 }
+
+// Function สำหรับค้นหาเพลงจาก YouTube
+async function searchYouTubeVideos(query) {
+  try {
+    console.log('Searching YouTube for:', query); // Debug log
+    const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+      params: {
+        part: 'snippet',
+        q: query,
+        type: 'video',
+        videoCategoryId: '10',
+        maxResults: 5,
+        key: process.env.YOUTUBE_API_KEY
+      }
+    });
+
+    if (!response.data.items || response.data.items.length === 0) {
+      console.log('No results found'); // Debug log
+      return [];
+    }
+
+    const results = response.data.items.map(item => ({
+      id: item.id.videoId,
+      title: item.snippet.title,
+      thumbnail: item.snippet.thumbnails.medium.url,
+      channel: item.snippet.channelTitle
+    }));
+
+    console.log('Processed results:', results); // Debug log
+    return results;
+
+  } catch (error) {
+    console.error('YouTube search error:', error);
+    throw error;
+  }
+}
+
+// ปรับปรุงฟังก์ชัน chatWithAI
+async function chatWithAI(messages, currentSong, songQueue) {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OpenAI API key is not configured');
+    }
+
+    // ดึงข้อความล่าสุดจากผู้ใช้
+    const userMessage = messages[messages.length - 1].content;
+
+    // ตรวจสอบคำสั่งควบคุมก่อน
+    if (userMessage.match(/^(ข้าม|skip|next)$/i)) {
+      return "ข้ามไปเพลงถัดไป [COMMAND:skip]";
+    }
+    if (userMessage.match(/^(หยุด|พัก|pause)$/i)) {
+      return "หยุดเล่นชั่วคราว [COMMAND:pause]";
+    }
+    if (userMessage.match(/^(เล่น|play|ต่อ)$/i)) {
+      return "เล่นต่อ [COMMAND:play]";
+    }
+    if (userMessage.match(/^(ล้างคิว|clear)$/i)) {
+      return "ล้างรายการเพลงในคิว [COMMAND:clear]";
+    }
+
+    // ตรวจสอบคำขอค้นหาเพลง
+    const searchPatterns = [
+      { regex: /เปิดเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" },
+      { regex: /หาเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" },
+      { regex: /อยากฟังเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" },
+      { regex: /เพลงคล้ายๆ\s*(.+)/i, prefix: "กำลังค้นหาเพลงที่คล้ายกับ" },
+      { regex: /แนะนำเพลงแนว\s*(.+)/i, prefix: "กำลังค้นหาเพลงแนว" },
+      { regex: /ขอเพลงแนว\s*(.+)/i, prefix: "กำลังค้นหาเพลงแนว" },
+      { regex: /ขอเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" }
+    ];
+
+    for (const pattern of searchPatterns) {
+      const match = userMessage.match(pattern.regex);
+      if (match) {
+        const searchTerm = match[1].trim();
+        return `${pattern.prefix} ${searchTerm} [SEARCH:${searchTerm}]`;
+      }
+    }
+
+    // ถ้าไม่ตรงกับรูปแบบใดๆ ให้ใช้ GPT-3 ตอบ
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content: `คุณคือผู้ช่วย AI ที่ช่วยจัดการเพลง ตอบคำถามสั้นๆ เกี่ยวกับการเล่นเพลงและคิวเพลง
+สถานะปัจจุบัน:
+${currentSong ? `- กำลังเล่น: ${currentSong.title}` : '- ไม่มีเพลงเล่นอยู่'}
+- จำนวนเพลงในคิว: ${songQueue.length} เพลง`
+        },
+        ...messages
+      ],
+      max_tokens: 150
+    });
+
+    return completion.choices[0].message.content;
+  } catch (error) {
+    console.error('Error chatting with AI:', error);
+    return "ขออภัย เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง";
+  }
+}
+
 
 server.listen(3000, () => {
   console.log('listening on *:3000');
