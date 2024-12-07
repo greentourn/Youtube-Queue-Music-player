@@ -522,7 +522,6 @@ ${currentSong ? `- กำลังเล่น: ${currentSong.title}` : '- ไ�
   }
 }
 
-
 server.listen(3000, () => {
   console.log('listening on *:3000');
 });
