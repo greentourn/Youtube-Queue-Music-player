@@ -3,11 +3,11 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const axios = require('axios');
-const OpenAI = require('openai');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+// Initialize Gemini API
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
 const app = express();
 const server = http.createServer(app);
@@ -459,14 +459,20 @@ async function searchYouTubeVideos(query) {
 // ปรับปรุงฟังก์ชัน chatWithAI
 async function chatWithAI(messages, currentSong, songQueue) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OpenAI API key is not configured');
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('Gemini API key is not configured');
     }
 
-    // ดึงข้อความล่าสุดจากผู้ใช้
+    // Ensure messages are valid
+    if (!Array.isArray(messages) || messages.some(msg => !msg.role || !msg.content)) {
+      console.error('Invalid chat history format:', messages);
+      return "ประวัติการสนทนาไม่ถูกต้อง";
+    }
+
+    // Extract the last user message
     const userMessage = messages[messages.length - 1].content;
 
-    // ตรวจสอบคำสั่งควบคุมก่อน
+    // Handle predefined control commands
     if (userMessage.match(/^(ข้าม|skip|next)$/i)) {
       return "ข้ามไปเพลงถัดไป [COMMAND:skip]";
     }
@@ -480,7 +486,7 @@ async function chatWithAI(messages, currentSong, songQueue) {
       return "ล้างรายการเพลงในคิว [COMMAND:clear]";
     }
 
-    // ตรวจสอบคำขอค้นหาเพลง
+    // Handle search patterns
     const searchPatterns = [
       { regex: /เปิดเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" },
       { regex: /หาเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" },
@@ -499,28 +505,42 @@ async function chatWithAI(messages, currentSong, songQueue) {
       }
     }
 
-    // ถ้าไม่ตรงกับรูปแบบใดๆ ให้ใช้ GPT-3 ตอบ
-    const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [
-        {
-          role: "system",
-          content: `คุณคือผู้ช่วย AI ที่ช่วยจัดการเพลง ตอบคำถามสั้นๆ เกี่ยวกับการเล่นเพลงและคิวเพลง
-สถานะปัจจุบัน:
-${currentSong ? `- กำลังเล่น: ${currentSong.title}` : '- ไม่มีเพลงเล่นอยู่'}
-- จำนวนเพลงในคิว: ${songQueue.length} เพลง`
-        },
-        ...messages
-      ],
-      max_tokens: 500
+    // Prepare context for AI
+    const context = `คุณคือผู้ช่วย AI ที่ช่วยจัดการเพลง ตอบคำถามสั้นๆ เกี่ยวกับการเล่นเพลงและคิวเพลง
+        สถานะปัจจุบัน:
+        ${currentSong ? `- กำลังเล่น: ${currentSong.title}` : '- ไม่มีเพลงเล่นอยู่'}
+        - จำนวนเพลงในคิว: ${songQueue.length} เพลง`;
+
+    // Convert chat history for Gemini format
+    const chatHistory = messages.map(msg => ({
+      role: msg.role === 'user' ? 'user' : 'model',
+      parts: [msg.content]
+    }));
+
+    // Initialize chat with Gemini API
+    const chat = model.startChat({
+      history: chatHistory,
+      generationConfig: {
+        maxOutputTokens: 150,
+      },
     });
 
-    return completion.choices[0].message.content;
+    // Send message and handle response
+    const result = await chat.sendMessage(context + "\n" + userMessage);
+
+    // Ensure response structure is valid
+    if (!result || !result.response || typeof result.response.text !== 'function') {
+      console.error('Invalid response structure from Gemini API:', result);
+      return "เกิดข้อผิดพลาดกับการประมวลผล AI";
+    }
+
+    return result.response.text();
   } catch (error) {
     console.error('Error chatting with AI:', error);
     return "ขออภัย เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง";
   }
 }
+
 
 server.listen(3000, () => {
   console.log('listening on *:3000');
