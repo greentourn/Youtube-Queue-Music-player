@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const axios = require('axios');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const DiscordMusicBot = require('./discord-bot');
 
 // Initialize Gemini API
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -22,6 +23,9 @@ let currentPlaybackState = {
   isPlaying: false,
   lastUpdate: Date.now()
 };
+
+const discordBot = new DiscordMusicBot(io, songQueue, currentPlaybackState, chatWithAI);
+discordBot.start(process.env.DISCORD_TOKEN);
 
 app.get('/youtube-info/:videoId', (req, res) => {
   const videoId = req.params.videoId;
@@ -401,6 +405,18 @@ io.on('connection', (socket) => {
       };
       io.emit('playbackState', currentPlaybackState);
     }
+  });
+
+  socket.on('queueUpdated', (queue) => {
+    console.log('Received queue update:', queue);
+    songQueue = [...queue]; // สร้าง array ใหม่
+    io.emit('queueUpdated', songQueue);
+  });
+  
+  socket.on('playbackState', (state) => {
+    console.log('Received playback state:', state);
+    currentPlaybackState = { ...state, lastUpdate: Date.now() };
+    io.emit('playbackState', currentPlaybackState);
   });
 
   // Handle disconnection
