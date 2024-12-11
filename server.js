@@ -486,55 +486,88 @@ async function chatWithAI(messages, currentSong, songQueue) {
       return "ล้างรายการเพลงในคิว [COMMAND:clear]";
     }
 
-    // Handle search patterns
+    // Handle specific information requests about current song
+    if (userMessage.match(/ข้อมูลเพลง|เพลงที่กำลังเล่น|เพลงอะไร|ขอข้อมูลเพลง/i)) {
+      if (!currentSong) {
+        return "ขณะนี้ไม่มีเพลงที่กำลังเล่นอยู่";
+      }
+      return `ขณะนี้กำลังเล่นเพลง: ${currentSong.title}`;
+    }
+
+    // Enhanced search patterns with better context extraction
     const searchPatterns = [
-      { regex: /เปิดเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" },
-      { regex: /หาเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" },
-      { regex: /อยากฟังเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" },
-      { regex: /เพลงคล้ายๆ\s*(.+)/i, prefix: "กำลังค้นหาเพลงที่คล้ายกับ" },
-      { regex: /แนะนำเพลงแนว\s*(.+)/i, prefix: "กำลังค้นหาเพลงแนว" },
-      { regex: /ขอเพลงแนว\s*(.+)/i, prefix: "กำลังค้นหาเพลงแนว" },
-      { regex: /ขอเพลง\s*(.+)/i, prefix: "กำลังค้นหาเพลง" }
+      {
+        regex: /เปิดเพลง\s*(.+)/i,
+        handler: (match) => processSearchRequest("เปิดเพลง", match[1])
+      },
+      {
+        regex: /หาเพลง\s*(.+)/i,
+        handler: (match) => processSearchRequest("ค้นหาเพลง", match[1])
+      },
+      {
+        regex: /อยากฟังเพลง\s*(.+)/i,
+        handler: (match) => processSearchRequest("ค้นหาเพลง", match[1])
+      },
+      {
+        regex: /(เพลงคล้ายๆ|เพลงแนว)\s*(.+)/i,
+        handler: (match) => processSearchRequest("ค้นหาเพลงแนว", match[2])
+      },
+      {
+        regex: /แนะนำเพลงแนว\s*(.+)/i,
+        handler: (match) => processSearchRequest("แนะนำเพลงแนว", match[1])
+      },
+      {
+        regex: /ขอเพลงแนว\s*(.+)/i,
+        handler: (match) => processSearchRequest("ค้นหาเพลงแนว", match[1])
+      },
+      {
+        regex: /ขอเพลง\s*(.+)/i,
+        handler: (match) => processSearchRequest("ค้นหาเพลง", match[1])
+      }
     ];
 
+    // Process search request with context
+    function processSearchRequest(context, searchTerm) {
+      searchTerm = searchTerm.trim();
+      
+      // Add context-specific keywords for better search results
+      let enhancedSearch = searchTerm;
+      if (searchTerm.match(/แนว|สไตล์|genre/i)) {
+        enhancedSearch = searchTerm.replace(/แนว|สไตล์|genre/i, '');
+      }
+      
+      // Add "music" or "เพลง" if not present
+      if (!searchTerm.includes('music') && !searchTerm.includes('เพลง')) {
+        enhancedSearch += ' เพลง';
+      }
+      
+      return {
+        searchTerm: enhancedSearch,
+        response: `${context} "${searchTerm}" [SEARCH:${enhancedSearch}]`
+      };
+    }
+
+    // Check for search patterns
     for (const pattern of searchPatterns) {
       const match = userMessage.match(pattern.regex);
       if (match) {
-        const searchTerm = match[1].trim();
-        return `${pattern.prefix} ${searchTerm} [SEARCH:${searchTerm}]`;
+        const result = pattern.handler(match);
+        return result.response;
       }
     }
 
-    // Prepare context for AI
-    const context = `คุณคือผู้ช่วย AI ที่ช่วยจัดการเพลง ตอบคำถามสั้นๆ เกี่ยวกับการเล่นเพลงและคิวเพลง
-        สถานะปัจจุบัน:
-        ${currentSong ? `- กำลังเล่น: ${currentSong.title}` : '- ไม่มีเพลงเล่นอยู่'}
-        - จำนวนเพลงในคิว: ${songQueue.length} เพลง`;
+    // If no search pattern matched, process as general conversation
+    const prompt = `คุณคือผู้ช่วย AI ที่ช่วยจัดการเพลงและให้ข้อมูลเกี่ยวกับเพลง
+    สถานะปัจจุบัน:
+    ${currentSong ? `- กำลังเล่น: ${currentSong.title}` : '- ไม่มีเพลงที่กำลังเล่นอยู่'}
+    - จำนวนเพลงในคิว: ${songQueue.length} เพลง
+    
+    คำถามจากผู้ใช้: ${userMessage}`;
 
-    // Convert chat history for Gemini format
-    const chatHistory = messages.map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [msg.content]
-    }));
-
-    // Initialize chat with Gemini API
-    const chat = model.startChat({
-      history: chatHistory,
-      generationConfig: {
-        maxOutputTokens: 150,
-      },
-    });
-
-    // Send message and handle response
-    const result = await chat.sendMessage(context + "\n" + userMessage);
-
-    // Ensure response structure is valid
-    if (!result || !result.response || typeof result.response.text !== 'function') {
-      console.error('Invalid response structure from Gemini API:', result);
-      return "เกิดข้อผิดพลาดกับการประมวลผล AI";
-    }
-
-    return result.response.text();
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
+    
   } catch (error) {
     console.error('Error chatting with AI:', error);
     return "ขออภัย เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง";
