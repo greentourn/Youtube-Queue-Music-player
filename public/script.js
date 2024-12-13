@@ -8,6 +8,7 @@ let isProcessingStateUpdate = false;
 let lastKnownState = null;
 let lastStateUpdate = Date.now();
 let syncInterval;
+let timeOffset = 0; // ค่าความต่างระหว่างเวลา server และ client
 
 function showPlaylistModal(videos, originalVideo) {
   const modalHtml = `
@@ -75,13 +76,39 @@ function onYouTubeIframeAPIReady() {
   });
 }
 
+// ฟังก์ชันสำหรับซิงค์เวลากับ server
+async function syncWithServer() {
+  const startTime = Date.now();
+  try {
+    const response = await fetch('/server-time');
+    const { serverTime } = await response.json();
+    const endTime = Date.now();
+    const networkDelay = (endTime - startTime) / 2;
+
+    // คำนวณความต่างของเวลา โดยหักลบ network latency
+    timeOffset = serverTime - (startTime + networkDelay);
+
+    // ทำการซิงค์ซ้ำทุก 5 นาที
+    setTimeout(syncWithServer, 5 * 60 * 1000);
+  } catch (error) {
+    console.error('Time sync failed:', error);
+    // ลองซิงค์ใหม่ใน 10 วินาที ถ้าเกิดข้อผิดพลาด
+    setTimeout(syncWithServer, 10000);
+  }
+}
+
+// ฟังก์ชันสำหรับรับค่าเวลาปัจจุบันของ server
+function getServerTime() {
+  return Date.now() + timeOffset;
+}
+
 function broadcastCurrentState() {
   if (!isProcessingStateUpdate && player && player.getCurrentTime) {
     const currentState = {
       videoId: player.getVideoData()?.video_id,
       timestamp: player.getCurrentTime(),
       isPlaying: player.getPlayerState() === YT.PlayerState.PLAYING,
-      lastUpdate: Date.now()
+      lastUpdate: getServerTime() // ใช้เวลา server แทน Date.now()
     };
     lastKnownState = currentState;
     socket.emit('updatePlaybackState', currentState);
@@ -487,7 +514,7 @@ socket.on('initialState', ({ songQueue: initialQueue, currentPlaybackState }) =>
 socket.on('playbackState', (state) => {
   if (!player || !player.loadVideoById) return;
 
-  const currentTime = Date.now();
+  const serverNow = getServerTime();
   // ไม่รับ state ที่เก่ากว่า state ปัจจุบัน
   if (state.lastUpdate < lastStateUpdate) return;
   lastStateUpdate = state.lastUpdate;
@@ -495,19 +522,18 @@ socket.on('playbackState', (state) => {
   isProcessingStateUpdate = true;
   lastKnownState = state;
 
-  const timeDiff = (currentTime - state.lastUpdate) / 1000;
+  const timeDiff = (serverNow - state.lastUpdate) / 1000;
   const currentVideoId = player.getVideoData()?.video_id;
 
   const handlePlayback = () => {
-    // คำนวณ targetTime ใหม่ โดยคำนึงถึงสถานะการเล่น
     const targetTime = state.isPlaying ?
-      state.timestamp + ((Date.now() - state.lastUpdate) / 1000) :
+      state.timestamp + ((getServerTime() - state.lastUpdate) / 1000) :
       state.timestamp;
 
     const currentTime = player.getCurrentTime();
     const timeDifference = Math.abs(currentTime - targetTime);
 
-    // ปรับ timestamp ถ้ามีความต่างมากกว่า 1 วินาที
+    // ปรับ timestamp ถ้ามีความต่างมากกว่า 0.5 วินาที
     if (timeDifference > 0.5) {
       player.seekTo(targetTime, true);
     }
@@ -793,6 +819,7 @@ socket.on('chat response', ({ message, isCommand }) => {
 
 // เริ่มต้น chat interface เมื่อโหลดหน้าเว็บ
 document.addEventListener('DOMContentLoaded', () => {
+  syncWithServer();
   // Initial setup
   initializeChatInterface();
 

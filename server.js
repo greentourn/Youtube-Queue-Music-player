@@ -16,6 +16,8 @@ const io = new Server(server);
 
 const chatHistory = new Map();
 
+
+
 let songQueue = [];
 let currentPlaybackState = {
   videoId: null,
@@ -26,6 +28,10 @@ let currentPlaybackState = {
 
 const discordBot = new DiscordMusicBot(io, songQueue, currentPlaybackState, chatWithAI);
 discordBot.start(process.env.DISCORD_TOKEN);
+
+app.get('/server-time', (req, res) => {
+  res.json({ serverTime: Date.now() });
+});
 
 app.get('/youtube-info/:videoId', (req, res) => {
   const videoId = req.params.videoId;
