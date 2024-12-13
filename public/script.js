@@ -508,7 +508,7 @@ socket.on('playbackState', (state) => {
     const timeDifference = Math.abs(currentTime - targetTime);
 
     // ปรับ timestamp ถ้ามีความต่างมากกว่า 1 วินาที
-    if (timeDifference > 1) {
+    if (timeDifference > 0.5) {
       player.seekTo(targetTime, true);
     }
 
