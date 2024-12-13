@@ -96,7 +96,7 @@ function startStateSync() {
     if (player?.getPlayerState() === YT.PlayerState.PLAYING) {
       broadcastCurrentState();
     }
-  }, 1000);
+  }, 1000);// sync ทุก 1 วินาที
 }
 
 function onPlayerStateChange(event) {
