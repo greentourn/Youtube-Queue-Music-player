@@ -123,7 +123,7 @@ function startStateSync() {
     if (player?.getPlayerState() === YT.PlayerState.PLAYING) {
       broadcastCurrentState();
     }
-  }, 1000);// sync ทุก 1 วินาที
+  }, 1000);
 }
 
 function onPlayerStateChange(event) {
@@ -192,33 +192,32 @@ async function onPlayerReady(event) {
   try {
     const response = await fetch('/current-state');
     const { currentPlaybackState, songQueue: initialQueue } = await response.json();
-    
+
     if (currentPlaybackState.videoId) {
-      const currentTime = Date.now();
-      const timeDiff = (currentTime - currentPlaybackState.lastUpdate) / 1000;
-      
+      const serverTime = getServerTime();
+      const timeDiff = (serverTime - currentPlaybackState.lastUpdate) / 1000;
+      const startSeconds = currentPlaybackState.timestamp + (currentPlaybackState.isPlaying ? timeDiff : 0);
+
       isProcessingStateUpdate = true;
-      await new Promise((resolve) => {
-        player.loadVideoById({
-          videoId: currentPlaybackState.videoId,
-          startSeconds: currentPlaybackState.timestamp + (currentPlaybackState.isPlaying ? timeDiff : 0)
-        });
-        
-        const checkState = setInterval(() => {
-          if (player.getPlayerState() !== YT.PlayerState.BUFFERING) {
-            clearInterval(checkState);
-            if (currentPlaybackState.isPlaying) {
-              player.playVideo();
-            } else {
-              player.pauseVideo();
-            }
-            isProcessingStateUpdate = false;
-            resolve();
-          }
-        }, 100);
+
+      player.loadVideoById({
+        videoId: currentPlaybackState.videoId,
+        startSeconds: startSeconds
       });
+
+      const checkState = setInterval(() => {
+        if (player.getPlayerState() === YT.PlayerState.PLAYING || YT.PlayerState.PAUSED) {
+          clearInterval(checkState);
+          if (currentPlaybackState.isPlaying) {
+            player.playVideo();
+          } else {
+            player.pauseVideo();
+          }
+          isProcessingStateUpdate = false;
+        }
+      }, 100);
     }
-    
+
     updateQueue(initialQueue);
     isInitialSync = false;
     startStateSync();

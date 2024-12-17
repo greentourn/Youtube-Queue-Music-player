@@ -48,15 +48,25 @@ app.get('/youtube-info/:videoId', (req, res) => {
 });
 
 app.get('/current-state', (req, res) => {
+  const currentTime = Date.now();
+  const timeDiff = (currentTime - currentPlaybackState.lastUpdate) / 1000;
+  const adjustedTimestamp = currentPlaybackState.isPlaying
+    ? currentPlaybackState.timestamp + timeDiff
+    : currentPlaybackState.timestamp;
+
   res.json({
     songQueue,
-    currentPlaybackState
+    currentPlaybackState: {
+      ...currentPlaybackState,
+      timestamp: adjustedTimestamp
+    }
   });
 });
 
 app.use(express.static('public'));
 
 io.on('connection', (socket) => {
+  console.log('New client connected');
   // Initialize chat history for new connection
   chatHistory.set(socket.id, []);
 
@@ -312,7 +322,6 @@ io.on('connection', (socket) => {
           isPlaying: true,
           lastUpdate: Date.now()
         };
-        io.emit('playbackState', currentPlaybackState);
       } else {
         currentPlaybackState = {
           videoId: null,
@@ -320,8 +329,8 @@ io.on('connection', (socket) => {
           isPlaying: false,
           lastUpdate: Date.now()
         };
-        io.emit('playbackState', currentPlaybackState);
       }
+      io.emit('playbackState', currentPlaybackState);
     }
   });
 
