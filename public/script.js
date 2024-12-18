@@ -178,6 +178,14 @@ function clearQueue() {
 }
 
 function playSongFromQueue(index) {
+  const videoId = extractVideoId(songQueue[index]);
+
+  // เพิ่มการอัพเดทชื่อเพลง
+  fetchVideoDetails(videoId, (videoDetails) => {
+    const nowPlayingTitle = document.getElementById('nowPlaying');
+    nowPlayingTitle.textContent = `กำลังเล่น: ${videoDetails.title}`;
+  });
+  
   socket.emit('playSongFromQueue', index);
 }
 
@@ -550,6 +558,12 @@ socket.on('playbackState', (state) => {
   };
 
   if (state.videoId !== currentVideoId) {
+    // อัพเดทชื่อเพลงที่กำลังเล่น
+    fetchVideoDetails(state.videoId, (videoDetails) => {
+      const nowPlayingTitle = document.getElementById('nowPlaying');
+      nowPlayingTitle.textContent = `กำลังเล่น: ${videoDetails.title}`;
+    });
+
     player.loadVideoById({
       videoId: state.videoId,
       startSeconds: state.timestamp + (state.isPlaying ? timeDiff : 0)
