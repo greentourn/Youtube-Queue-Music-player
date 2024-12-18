@@ -820,6 +820,19 @@ socket.on('chat response', ({ message, isCommand }) => {
 });
 
 
+// เพิ่มที่ส่วน socket event listeners
+socket.on('activeUsers', (count) => {
+  const activeUsersElement = document.getElementById('activeUsers');
+  if (activeUsersElement) {
+    // เพิ่ม animation เมื่อมีการเปลี่ยนแปลง
+    activeUsersElement.style.transform = 'scale(1.2)';
+    activeUsersElement.textContent = count;
+    setTimeout(() => {
+      activeUsersElement.style.transform = 'scale(1)';
+    }, 200);
+  }
+});
+
 
 // เริ่มต้น chat interface เมื่อโหลดหน้าเว็บ
 document.addEventListener('DOMContentLoaded', () => {

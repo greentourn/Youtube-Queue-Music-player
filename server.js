@@ -16,7 +16,7 @@ const io = new Server(server);
 
 const chatHistory = new Map();
 
-
+let activeUsers = 0;
 
 let songQueue = [];
 let currentPlaybackState = {
@@ -83,6 +83,8 @@ io.on('connection', (socket) => {
   console.log('New client connected');
   // Initialize chat history for new connection
   chatHistory.set(socket.id, []);
+  activeUsers++;
+  io.emit('activeUsers', activeUsers);
 
   // Send current state to new user
   socket.emit('initialState', {
@@ -471,6 +473,8 @@ io.on('connection', (socket) => {
 
   // Handle disconnection
   socket.on('disconnect', () => {
+    activeUsers--;
+    io.emit('activeUsers', activeUsers);
     chatHistory.delete(socket.id);
   });
 });
