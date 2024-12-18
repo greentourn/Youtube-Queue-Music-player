@@ -26,6 +26,20 @@ let currentPlaybackState = {
   lastUpdate: Date.now()
 };
 
+const queueMutex = {
+  locked: false,
+  lock() {
+    if (this.locked) {
+      return false;
+    }
+    this.locked = true;
+    return true;
+  },
+  unlock() {
+    this.locked = false;
+  }
+};
+
 const discordBot = new DiscordMusicBot(io, songQueue, currentPlaybackState, chatWithAI);
 discordBot.start(process.env.DISCORD_TOKEN);
 
@@ -241,11 +255,24 @@ io.on('connection', (socket) => {
 
   // Handle playback state updates
   socket.on('updatePlaybackState', (state) => {
-    currentPlaybackState = {
-      ...state,
-      lastUpdate: Date.now()
-    };
-    socket.broadcast.emit('playbackState', currentPlaybackState);
+    if (!validateState(state)) {
+      console.error('Invalid state received:', state);
+      return;
+    }
+
+    if (!queueMutex.lock()) {
+      return;
+    }
+
+    try {
+      currentPlaybackState = {
+        ...state,
+        lastUpdate: Date.now()
+      };
+      socket.broadcast.emit('playbackState', currentPlaybackState);
+    } finally {
+      queueMutex.unlock();
+    }
   });
 
   // Handle adding songs
@@ -310,27 +337,35 @@ io.on('connection', (socket) => {
 
   // Handle skipping songs
   socket.on('skipSong', () => {
-    if (songQueue.length > 0) {
-      songQueue.shift();
-      io.emit('queueUpdated', songQueue);
+    if (!queueMutex.lock()) {
+      return; // ถ้า mutex ถูก lock อยู่ให้ข้าม
+    }
 
+    try {
       if (songQueue.length > 0) {
-        const nextVideoId = extractVideoId(songQueue[0]);
-        currentPlaybackState = {
-          videoId: nextVideoId,
-          timestamp: 0,
-          isPlaying: true,
-          lastUpdate: Date.now()
-        };
-      } else {
-        currentPlaybackState = {
-          videoId: null,
-          timestamp: 0,
-          isPlaying: false,
-          lastUpdate: Date.now()
-        };
+        const currentSong = songQueue.shift();
+        io.emit('queueUpdated', songQueue);
+
+        if (songQueue.length > 0) {
+          const nextVideoId = extractVideoId(songQueue[0]);
+          currentPlaybackState = {
+            videoId: nextVideoId,
+            timestamp: 0,
+            isPlaying: true,
+            lastUpdate: Date.now()
+          };
+        } else {
+          currentPlaybackState = {
+            videoId: null,
+            timestamp: 0,
+            isPlaying: false,
+            lastUpdate: Date.now()
+          };
+        }
+        io.emit('playbackState', currentPlaybackState);
       }
-      io.emit('playbackState', currentPlaybackState);
+    } finally {
+      queueMutex.unlock();
     }
   });
 
@@ -439,6 +474,13 @@ io.on('connection', (socket) => {
     chatHistory.delete(socket.id);
   });
 });
+
+function validateState(state) {
+  return state &&
+    typeof state.timestamp === 'number' &&
+    typeof state.isPlaying === 'boolean' &&
+    typeof state.lastUpdate === 'number';
+}
 
 // ปรับปรุงฟังก์ชัน extractVideoId ให้รองรับการแยก playlistId
 function extractVideoId(url) {

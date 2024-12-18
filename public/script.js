@@ -10,6 +10,22 @@ let lastStateUpdate = Date.now();
 let syncInterval;
 let timeOffset = 0; // ค่าความต่างระหว่างเวลา server และ client
 
+
+function emitWithRetry(eventName, data, maxRetries = 3) {
+  let retries = 0;
+
+  function tryEmit() {
+    socket.emit(eventName, data, (ack) => {
+      if (!ack && retries < maxRetries) {
+        retries++;
+        setTimeout(tryEmit, 1000 * retries); // exponential backoff
+      }
+    });
+  }
+
+  tryEmit();
+}
+
 function showPlaylistModal(videos, originalVideo) {
   const modalHtml = `
     <div class="modal fade" id="playlistModal" tabindex="-1">
@@ -229,16 +245,7 @@ async function onPlayerReady(event) {
 function handleVideoEnded() {
   if (songQueue.length > 0) {
     // เมื่อเพลงจบ ให้เล่นเพลงแรกในคิว
-    const nextVideoId = extractVideoId(songQueue[0]);
-    if (nextVideoId) {
-      currentPlaybackState = {
-        videoId: nextVideoId,
-        timestamp: 0,
-        isPlaying: true,
-        lastUpdate: Date.now()
-      };
-      socket.emit('skipSong'); // จะทำให้เพลงแรกถูกลบออกจากคิวและอัพเดทสถานะ
-    }
+    emitWithRetry('skipSong');// ให้ server จัดการคิวและส่ง state กลับมา
   } else {
     // ถ้าไม่มีเพลงในคิว รีเซ็ตสถานะ
     const state = {
@@ -247,9 +254,7 @@ function handleVideoEnded() {
       isPlaying: false,
       lastUpdate: Date.now()
     };
-    lastKnownState = state;
-    isSongPlaying = false;
-    socket.emit('updatePlaybackState', state);
+    emitWithRetry('updatePlaybackState', state);
 
     // อัพเดทชื่อเพลง
     const nowPlayingTitle = document.getElementById('nowPlaying');
