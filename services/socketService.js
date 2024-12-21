@@ -34,6 +34,13 @@ class SocketService {
         currentPlaybackState: this.stateService.getState()
       });
 
+      socket.on('getInitialState', () => {
+        const queue = this.queueService.getQueue();
+        const state = this.stateService.getState();
+        socket.emit('queueUpdated', queue);
+        socket.emit('playbackState', state);
+      });
+
       // Handle chat messages
       socket.on('chat message', async (message) => {
         try {
@@ -84,7 +91,7 @@ class SocketService {
                   const currentTime = Date.now();
                   const currentState = this.stateService.getState();
                   const timeDiff = (currentTime - currentState.lastUpdate) / 1000;
-                  
+
                   this.stateService.updateState({
                     ...currentState,
                     timestamp: currentState.timestamp + (currentState.isPlaying ? timeDiff : 0),
@@ -221,31 +228,47 @@ class SocketService {
       });
 
       // Handle skipping songs
-      socket.on('skipSong', () => {
+      socket.on('skipSong', async () => {
         if (this.queueService.mutex.lock()) {
           try {
-            if (this.queueService.getQueue().length > 0) {
+            const queue = this.queueService.getQueue();
+            if (queue.length > 0) {
+              // Remove current song
               this.queueService.removeSong(0);
-              this.io.emit('queueUpdated', this.queueService.getQueue());
 
-              if (this.queueService.getQueue().length > 0) {
-                const nextVideoId = this.extractVideoId(this.queueService.getQueue()[0]);
-                this.stateService.updateState({
-                  videoId: nextVideoId,
-                  timestamp: 0,
-                  isPlaying: true,
-                  lastUpdate: Date.now()
-                });
+              // Get updated queue
+              const updatedQueue = this.queueService.getQueue();
+
+              // Broadcast queue update
+              this.io.emit('queueUpdated', updatedQueue);
+
+              // Play next song if available
+              if (updatedQueue.length > 0) {
+                const nextVideoId = this.extractVideoId(updatedQueue[0]);
+                if (nextVideoId) {
+                  const newState = {
+                    videoId: nextVideoId,
+                    timestamp: 0,
+                    isPlaying: true,
+                    lastUpdate: Date.now()
+                  };
+                  this.stateService.updateState(newState);
+                  this.io.emit('playbackState', this.stateService.getState());
+                }
               } else {
-                this.stateService.updateState({
+                // No more songs in queue
+                const emptyState = {
                   videoId: null,
                   timestamp: 0,
                   isPlaying: false,
                   lastUpdate: Date.now()
-                });
+                };
+                this.stateService.updateState(emptyState);
+                this.io.emit('playbackState', this.stateService.getState());
               }
-              this.io.emit('playbackState', this.stateService.getState());
             }
+          } catch (error) {
+            console.error('Error handling skip song:', error);
           } finally {
             this.queueService.mutex.unlock();
           }
@@ -330,17 +353,38 @@ class SocketService {
         }
       });
 
+      socket.on('checkQueue', () => {
+        if (this.queueService.getQueue().length > 0) {
+          const nextVideoId = this.extractVideoId(this.queueService.getQueue()[0]);
+          if (nextVideoId) {
+            const newState = {
+              videoId: nextVideoId,
+              timestamp: 0,
+              isPlaying: true,
+              lastUpdate: Date.now()
+            };
+            this.stateService.updateState(newState);
+            this.io.emit('playbackState', this.stateService.getState());
+          }
+        }
+      });
+
       // Queue and playback state sync
       socket.on('queueUpdated', (queue) => {
         console.log('Received queue update:', queue);
         this.queueService.songQueue = [...queue];
         this.io.emit('queueUpdated', this.queueService.getQueue());
       });
-      
+
       socket.on('playbackState', (state) => {
         console.log('Received playback state:', state);
         this.stateService.updateState(state);
         this.io.emit('playbackState', this.stateService.getState());
+      });
+
+      socket.on('videoEnded', () => {
+        // Use the same logic as skipSong
+        socket.emit('skipSong');
       });
 
       // Handle disconnect

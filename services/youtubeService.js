@@ -5,45 +5,45 @@ class YouTubeService {
     this.apiKey = apiKey;
   }
 
-  async getVideoInfo(videoId) {
-    const url = `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${this.apiKey}&part=snippet`;
-    try {
-      const response = await axios.get(url);
-      return response.data.items[0].snippet;
-    } catch (error) {
-      console.error('Error getting video info:', error);
-      throw new Error('Error retrieving video details');
+  async getVideoInfo(videoId, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const url = `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${this.apiKey}&part=snippet`;
+        const response = await axios.get(url);
+        if (response.data.items && response.data.items.length > 0) {
+          return response.data.items[0].snippet;
+        }
+        throw new Error('Video not found');
+      } catch (error) {
+        if (i === retries - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+      }
     }
   }
 
-  async searchVideos(query) {
-    try {
-      console.log('Searching YouTube for:', query);
-      const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-        params: {
-          part: 'snippet',
-          q: query,
-          type: 'video',
-          videoCategoryId: '10',
-          maxResults: 5,
-          key: this.apiKey
-        }
-      });
-
-      if (!response.data.items || response.data.items.length === 0) {
-        console.log('No results found');
-        return [];
+  async searchVideos(query, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+          params: {
+            part: 'snippet',
+            q: query,
+            type: 'video',
+            videoCategoryId: '10',
+            maxResults: 5,
+            key: this.apiKey
+          }
+        });
+        return response.data.items.map(item => ({
+          id: item.id.videoId,
+          title: item.snippet.title,
+          thumbnail: item.snippet.thumbnails.medium.url,
+          channel: item.snippet.channelTitle
+        }));
+      } catch (error) {
+        if (i === retries - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
       }
-
-      return response.data.items.map(item => ({
-        id: item.id.videoId,
-        title: item.snippet.title,
-        thumbnail: item.snippet.thumbnails.medium.url,
-        channel: item.snippet.channelTitle
-      }));
-    } catch (error) {
-      console.error('YouTube search error:', error);
-      throw error;
     }
   }
 

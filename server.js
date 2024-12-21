@@ -8,6 +8,7 @@ const YouTubeService = require('./services/youtubeService');
 const QueueService = require('./services/queueService');
 const StateService = require('./services/stateService');
 const SocketService = require('./services/socketService');
+const packageInfo = require('./package.json');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +28,10 @@ const discordBot = new DiscordMusicBot(
   chatWithAI
 );
 discordBot.start(process.env.DISCORD_TOKEN);
+
+app.get('/version', (req, res) => {
+  res.json({ version: packageInfo.version });
+});
 
 // Setup routes
 app.get('/server-time', (req, res) => {

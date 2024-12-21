@@ -1,6 +1,6 @@
 {
   "name": "music-player",
-  "version": "0.8.2",
+  "version": "0.8.4",
   "description": "![image](https://github.com/user-attachments/assets/b829be41-16d4-4f23-885d-655796a38151)",
   "main": "server.js",
   "scripts": {

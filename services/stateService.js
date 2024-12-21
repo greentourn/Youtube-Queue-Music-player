@@ -14,11 +14,16 @@ class StateService {
   
     updateState(state) {
       if (this.validateState(state)) {
-        this.currentPlaybackState = {
-          ...state,
-          lastUpdate: Date.now()
-        };
-        return true;
+        const now = Date.now();
+        // ป้องกันการอัพเดทย้อนหลัง
+        if (!this.currentPlaybackState.lastUpdate || 
+            state.lastUpdate >= this.currentPlaybackState.lastUpdate) {
+            this.currentPlaybackState = {
+                ...state,
+                lastUpdate: now
+            };
+            return true;
+        }
       }
       return false;
     }
@@ -27,7 +32,9 @@ class StateService {
       return state &&
         typeof state.timestamp === 'number' &&
         typeof state.isPlaying === 'boolean' &&
-        typeof state.lastUpdate === 'number';
+        typeof state.lastUpdate === 'number'&&
+        // เพิ่มการตรวจสอบ videoId
+        (state.videoId === null || typeof state.videoId === 'string');
     }
   }
   

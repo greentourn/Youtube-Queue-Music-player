@@ -33,10 +33,11 @@ async function chatWithAI(messages, currentSong, songQueue) {
     }
 
     // Ensure messages are valid
-    if (!Array.isArray(messages) || messages.some(msg => !msg.role || !msg.content)) {
-      console.error('Invalid chat history format:', messages);
-      return "ประวัติการสนทนาไม่ถูกต้อง";
-    }
+    if (!Array.isArray(messages) || 
+            messages.some(msg => !msg.role || !msg.content)) {
+            console.error('Invalid chat history format:', messages);
+            return "ประวัติการสนทนาไม่ถูกต้อง";
+        }
 
     // Extract the last user message
     const userMessage = messages[messages.length - 1].content;
@@ -112,8 +113,12 @@ async function chatWithAI(messages, currentSong, songQueue) {
     
     คำถามจากผู้ใช้: ${userMessage}`;
 
+    // เพิ่มการตรวจสอบ response
     const result = await model.generateContent(prompt);
     const response = await result.response;
+    if (!response || !response.text()) {
+        throw new Error('Invalid AI response');
+    }
     return response.text();
     
   } catch (error) {

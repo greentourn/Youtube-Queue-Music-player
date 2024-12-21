@@ -14,7 +14,7 @@
     <!-- Header -->
     <div class="d-flex flex-row align-items-center">
       <h1 id="dudee-music-queue" class="mb-4 text-white">Dudee Music Queue</h1>
-      <span class="text-white ms-3">Version 0.8.1</span>
+      <span id="version" class="text-white ms-3">Version 0.8.2</span>
       <div class="ms-3 d-flex align-items-center">
         <i class="fas fa-users text-primary me-2"></i>
         <span id="activeUsers" class="text-white">0</span>
@@ -37,7 +37,7 @@
         <h3 id="nowPlaying" class="now-playing-title text-white">ไม่มีเพลง</h3>
         <div id="player" class="mb-3"></div>
         <div class="mb-3 d-flex gap-3">
-          <button id="skipButton" class="btn btn-secondary" onclick="skipSong()">
+          <button id="skipButton" class="btn btn-secondary">
             <i class="fas fa-forward"></i> ข้ามเพลง
           </button>
           <button id="clearQueueBtn" class="btn btn-danger">
@@ -96,7 +96,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
-  <script src="script.js"></script>
+
+  <script type="module" src="js/main.js"></script>
+  <!-- <script src="script.js"></script> -->
 </body>
 
 </html>
