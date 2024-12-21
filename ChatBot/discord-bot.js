@@ -1,8 +1,9 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const axios = require('axios');
+const chatWithAI = require('./chatAI');
 
 class DiscordMusicBot {
-  constructor(io, songQueue, currentPlaybackState, chatWithAI) {
+  constructor(io, songQueue, currentPlaybackState) {
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
