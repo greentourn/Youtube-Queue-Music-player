@@ -2,73 +2,58 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const axios = require('axios');
 const chatWithAI = require('./ChatBot/chatAI');
 const DiscordMusicBot = require('./ChatBot/discord-bot');
-
+const YouTubeService = require('./services/youtubeService');
+const QueueService = require('./services/queueService');
+const StateService = require('./services/stateService');
+const SocketService = require('./services/socketService');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const chatHistory = new Map();
+// Initialize services
+const youtubeService = new YouTubeService(process.env.YOUTUBE_API_KEY);
+const queueService = new QueueService();
+const stateService = new StateService();
+const socketService = new SocketService(io, youtubeService, queueService, stateService);
 
-let activeUsers = 0;
-
-let songQueue = [];
-let currentPlaybackState = {
-  videoId: null,
-  timestamp: 0,
-  isPlaying: false,
-  lastUpdate: Date.now()
-};
-
-const queueMutex = {
-  locked: false,
-  lock() {
-    if (this.locked) {
-      return false;
-    }
-    this.locked = true;
-    return true;
-  },
-  unlock() {
-    this.locked = false;
-  }
-};
-
-const discordBot = new DiscordMusicBot(io, songQueue, currentPlaybackState, chatWithAI);
+// Initialize Discord bot
+const discordBot = new DiscordMusicBot(
+  io,
+  queueService.getQueue(),
+  stateService.getState(),
+  chatWithAI
+);
 discordBot.start(process.env.DISCORD_TOKEN);
 
+// Setup routes
 app.get('/server-time', (req, res) => {
   res.json({ serverTime: Date.now() });
 });
 
-app.get('/youtube-info/:videoId', (req, res) => {
-  const videoId = req.params.videoId;
-  const apiKey = process.env.YOUTUBE_API_KEY;
-  const url = `https://www.googleapis.com/youtube/v3/videos?id=${videoId}&key=${apiKey}&part=snippet`;
-
-  axios.get(url)
-    .then(response => {
-      res.json(response.data.items[0].snippet);
-    })
-    .catch(error => {
-      res.status(500).send('Error retrieving video details');
-    });
+app.get('/youtube-info/:videoId', async (req, res) => {
+  try {
+    const videoInfo = await youtubeService.getVideoInfo(req.params.videoId);
+    res.json(videoInfo);
+  } catch (error) {
+    res.status(500).send('Error retrieving video details');
+  }
 });
 
 app.get('/current-state', (req, res) => {
+  const currentState = stateService.getState();
   const currentTime = Date.now();
-  const timeDiff = (currentTime - currentPlaybackState.lastUpdate) / 1000;
-  const adjustedTimestamp = currentPlaybackState.isPlaying
-    ? currentPlaybackState.timestamp + timeDiff
-    : currentPlaybackState.timestamp;
+  const timeDiff = (currentTime - currentState.lastUpdate) / 1000;
+  const adjustedTimestamp = currentState.isPlaying
+    ? currentState.timestamp + timeDiff
+    : currentState.timestamp;
 
   res.json({
-    songQueue,
+    songQueue: queueService.getQueue(),
     currentPlaybackState: {
-      ...currentPlaybackState,
+      ...currentState,
       timestamp: adjustedTimestamp
     }
   });
@@ -76,460 +61,10 @@ app.get('/current-state', (req, res) => {
 
 app.use(express.static('public'));
 
-io.on('connection', (socket) => {
-  console.log('New client connected');
-  // Initialize chat history for new connection
-  chatHistory.set(socket.id, []);
-  activeUsers++;
-  io.emit('activeUsers', activeUsers);
+// Start socket handlers
+socketService.setupSocketHandlers();
 
-  // Send current state to new user
-  socket.emit('initialState', {
-    songQueue,
-    currentPlaybackState
-  });
-
-  // เพิ่ม socket event listener
-  socket.on('search results', ({ results, message }) => {
-    showSearchResults(results, message);
-  });
-
-  // Handle chat messages
-  socket.on('chat message', async (message) => {
-    try {
-      const currentVideoId = currentPlaybackState.videoId;
-      let currentSong = null;
-
-      if (currentVideoId) {
-        try {
-          const response = await axios.get(
-            `https://www.googleapis.com/youtube/v3/videos?id=${currentVideoId}&key=${process.env.YOUTUBE_API_KEY}&part=snippet`
-          );
-          currentSong = {
-            title: response.data.items[0].snippet.title,
-            videoId: currentVideoId
-          };
-        } catch (error) {
-          console.error('Error fetching video details:', error);
-        }
-      }
-
-      // อัพเดทประวัติแชท
-      const history = chatHistory.get(socket.id);
-      history.push({ role: "user", content: message });
-      if (history.length > 10) history.shift();
-
-      // ขอคำตอบจาก AI
-      const response = await chatWithAI(history, currentSong, songQueue);
-      history.push({ role: "assistant", content: response });
-
-      // ตรวจสอบคำสั่งควบคุม
-      const commandMatch = response.match(/\[COMMAND:(\w+)(?::(\d+))?\]/);
-      if (commandMatch) {
-        const command = commandMatch[1];
-        const param = commandMatch[2];
-
-        // จัดการคำสั่งโดยตรง
-        switch (command) {
-          case 'play':
-            if (!currentPlaybackState.isPlaying && currentPlaybackState.videoId) {
-              currentPlaybackState = {
-                ...currentPlaybackState,
-                isPlaying: true,
-                lastUpdate: Date.now()
-              };
-              io.emit('playbackState', currentPlaybackState);
-            }
-            break;
-
-          case 'pause':
-            if (currentPlaybackState.isPlaying) {
-              // อัพเดท timestamp ให้ตรงกับเวลาที่หยุด
-              const currentTime = Date.now();
-              const timeDiff = (currentTime - currentPlaybackState.lastUpdate) / 1000;
-              currentPlaybackState = {
-                ...currentPlaybackState,
-                timestamp: currentPlaybackState.timestamp + (currentPlaybackState.isPlaying ? timeDiff : 0),
-                isPlaying: false,
-                lastUpdate: currentTime
-              };
-              io.emit('playbackState', currentPlaybackState);
-            }
-            break;
-
-          case 'skip':
-            if (songQueue.length > 0) {
-              // ลบเพลงปัจจุบันออกจากคิว
-              songQueue.shift();
-              io.emit('queueUpdated', songQueue);
-
-              if (songQueue.length > 0) {
-                // ถ้ายังมีเพลงในคิว ให้เล่นเพลงถัดไปทันที
-                const nextVideoId = extractVideoId(songQueue[0]);
-                currentPlaybackState = {
-                  videoId: nextVideoId,
-                  timestamp: 0,
-                  isPlaying: true,
-                  lastUpdate: Date.now()
-                };
-              } else {
-                // ถ้าไม่มีเพลงในคิวแล้ว
-                currentPlaybackState = {
-                  videoId: null,
-                  timestamp: 0,
-                  isPlaying: false,
-                  lastUpdate: Date.now()
-                };
-              }
-              // ส่ง state ใหม่ไปที่ client ทันที
-              io.emit('playbackState', currentPlaybackState);
-            }
-            break;
-
-          case 'clear':
-            if (songQueue.length > 1) {
-              const currentSong = songQueue[0];
-              songQueue = [currentSong];
-              io.emit('queueUpdated', songQueue);
-            }
-            break;
-
-          case 'remove':
-            if (param && Number(param) > 0 && Number(param) < songQueue.length) {
-              songQueue.splice(Number(param), 1);
-              io.emit('queueUpdated', songQueue);
-            }
-            break;
-        }
-
-        socket.emit('chat response', {
-          message: response.replace(/\[COMMAND:\w+(?::\d+)?\]/g, '').trim(),
-          isCommand: true
-        });
-        return;
-      }
-
-      // ตรวจสอบคำสั่งค้นหา
-      const searchMatch = response.match(/\[SEARCH:(.*?)\]/);
-      if (searchMatch) {
-        const searchQuery = searchMatch[1].trim();
-        try {
-          const searchResults = await searchYouTubeVideos(searchQuery);
-          if (searchResults.length > 0) {
-            socket.emit('search results', {
-              results: searchResults,
-              message: response.replace(/\[SEARCH:.*?\]/, '').trim()
-            });
-          } else {
-            socket.emit('chat response', {
-              message: "ขออภัย ฉันไม่พบเพลงที่คุณต้องการ กรุณาลองใหม่อีกครั้ง",
-              isCommand: false
-            });
-          }
-          return;
-        } catch (error) {
-          console.error('Error searching videos:', error);
-          socket.emit('chat response', {
-            message: "ขออภัย เกิดข้อผิดพลาดในการค้นหาเพลง กรุณาลองใหม่อีกครั้ง",
-            isCommand: false
-          });
-        }
-        return;
-      }
-
-      // ส่งข้อความปกติ
-      socket.emit('chat response', {
-        message: response,
-        isCommand: false
-      });
-
-    } catch (error) {
-      console.error('Error processing chat:', error);
-      socket.emit('chat response', {
-        message: "ขออภัย เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง",
-        isCommand: false
-      });
-    }
-  });
-
-  // Handle playback state updates
-  socket.on('updatePlaybackState', (state) => {
-    if (!validateState(state)) {
-      console.error('Invalid state received:', state);
-      return;
-    }
-
-    if (!queueMutex.lock()) {
-      return;
-    }
-
-    try {
-      currentPlaybackState = {
-        ...state,
-        lastUpdate: Date.now()
-      };
-      socket.broadcast.emit('playbackState', currentPlaybackState);
-    } finally {
-      queueMutex.unlock();
-    }
-  });
-
-  // Handle adding songs
-  socket.on('addSong', async (input) => {
-    const videoId = extractVideoId(input);
-    const playlistId = extractPlaylistId(input);
-
-    if (playlistId && videoId) {
-      try {
-        const apiKey = process.env.YOUTUBE_API_KEY;
-        const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${playlistId}&key=${apiKey}`;
-        const response = await axios.get(url);
-
-        let startIndex = response.data.items.findIndex(
-          item => item.snippet.resourceId.videoId === videoId
-        );
-
-        if (startIndex === -1) startIndex = 0;
-
-        const videos = [
-          ...response.data.items.slice(startIndex),
-          ...response.data.items.slice(0, startIndex)
-        ].map(item => `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`);
-
-        socket.emit('playlistFound', {
-          videos,
-          playlistId,
-          originalVideo: input
-        });
-      } catch (error) {
-        console.error('Error fetching playlist:', error);
-        if (videoId) {
-          songQueue.push(input);
-          io.emit('queueUpdated', songQueue);
-
-          if (!currentPlaybackState.videoId || !currentPlaybackState.isPlaying) {
-            currentPlaybackState = {
-              videoId,
-              timestamp: 0,
-              isPlaying: true,
-              lastUpdate: Date.now()
-            };
-            io.emit('playbackState', currentPlaybackState);
-          }
-        }
-      }
-    } else if (videoId) {
-      songQueue.push(input);
-      io.emit('queueUpdated', songQueue);
-
-      if (!currentPlaybackState.videoId || !currentPlaybackState.isPlaying) {
-        currentPlaybackState = {
-          videoId,
-          timestamp: 0,
-          isPlaying: true,
-          lastUpdate: Date.now()
-        };
-        io.emit('playbackState', currentPlaybackState);
-      }
-    }
-  });
-
-  // Handle skipping songs
-  socket.on('skipSong', () => {
-    if (!queueMutex.lock()) {
-      return; // ถ้า mutex ถูก lock อยู่ให้ข้าม
-    }
-
-    try {
-      if (songQueue.length > 0) {
-        const currentSong = songQueue.shift();
-        io.emit('queueUpdated', songQueue);
-
-        if (songQueue.length > 0) {
-          const nextVideoId = extractVideoId(songQueue[0]);
-          currentPlaybackState = {
-            videoId: nextVideoId,
-            timestamp: 0,
-            isPlaying: true,
-            lastUpdate: Date.now()
-          };
-        } else {
-          currentPlaybackState = {
-            videoId: null,
-            timestamp: 0,
-            isPlaying: false,
-            lastUpdate: Date.now()
-          };
-        }
-        io.emit('playbackState', currentPlaybackState);
-      }
-    } finally {
-      queueMutex.unlock();
-    }
-  });
-
-  // Handle removing songs
-  socket.on('removeSong', (index) => {
-    if (index >= 0 && index < songQueue.length) {
-      songQueue.splice(index, 1);
-      io.emit('queueUpdated', songQueue);
-
-      if (index === 0) {
-        if (songQueue.length > 0) {
-          const nextVideoId = extractVideoId(songQueue[0]);
-          currentPlaybackState = {
-            videoId: nextVideoId,
-            timestamp: 0,
-            isPlaying: true,
-            lastUpdate: Date.now()
-          };
-        } else {
-          currentPlaybackState = {
-            videoId: null,
-            timestamp: 0,
-            isPlaying: false,
-            lastUpdate: Date.now()
-          };
-        }
-        io.emit('playbackState', currentPlaybackState);
-      }
-    }
-  });
-
-  // Handle moving songs in queue
-  socket.on('moveSong', (fromIndex, toIndex) => {
-    if (
-      fromIndex >= 0 && fromIndex < songQueue.length &&
-      toIndex >= 0 && toIndex < songQueue.length
-    ) {
-      const [movedSong] = songQueue.splice(fromIndex, 1);
-      songQueue.splice(toIndex, 0, movedSong);
-      io.emit('queueUpdated', songQueue);
-    }
-  });
-
-  // Handle adding playlist videos
-  socket.on('addPlaylistVideos', (videos) => {
-    videos.forEach(video => {
-      songQueue.push(video);
-    });
-    io.emit('queueUpdated', songQueue);
-
-    if (!currentPlaybackState.videoId || !currentPlaybackState.isPlaying) {
-      const firstVideoId = extractVideoId(videos[0]);
-      if (firstVideoId) {
-        currentPlaybackState = {
-          videoId: firstVideoId,
-          timestamp: 0,
-          isPlaying: true,
-          lastUpdate: Date.now()
-        };
-        io.emit('playbackState', currentPlaybackState);
-      }
-    }
-  });
-
-  // Handle clearing queue
-  socket.on('clearQueue', () => {
-    if (songQueue.length > 1) {
-      const currentSong = songQueue[0];
-      songQueue = [currentSong];
-      io.emit('queueUpdated', songQueue);
-    }
-  });
-
-  // Handle playing song from queue
-  socket.on('playSongFromQueue', (index) => {
-    if (index >= 0 && index < songQueue.length) {
-      const songToPlay = songQueue[index];
-      songQueue.splice(index, 1);
-
-      io.emit('queueUpdated', songQueue);
-      const videoId = extractVideoId(songToPlay);
-      currentPlaybackState = {
-        videoId: videoId,
-        timestamp: 0,
-        isPlaying: true,
-        lastUpdate: Date.now()
-      };
-      io.emit('playbackState', currentPlaybackState);
-    }
-  });
-
-  socket.on('queueUpdated', (queue) => {
-    console.log('Received queue update:', queue);
-    songQueue = [...queue]; // สร้าง array ใหม่
-    io.emit('queueUpdated', songQueue);
-  });
-  
-  socket.on('playbackState', (state) => {
-    console.log('Received playback state:', state);
-    currentPlaybackState = { ...state, lastUpdate: Date.now() };
-    io.emit('playbackState', currentPlaybackState);
-  });
-
-  // Handle disconnection
-  socket.on('disconnect', () => {
-    activeUsers--;
-    io.emit('activeUsers', activeUsers);
-    chatHistory.delete(socket.id);
-  });
-});
-
-function validateState(state) {
-  return state &&
-    typeof state.timestamp === 'number' &&
-    typeof state.isPlaying === 'boolean' &&
-    typeof state.lastUpdate === 'number';
-}
-
-// ปรับปรุงฟังก์ชัน extractVideoId ให้รองรับการแยก playlistId
-function extractVideoId(url) {
-  const videoIdMatch = url.match(/(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-  return videoIdMatch ? videoIdMatch[1] : null;
-}
-
-function extractPlaylistId(url) {
-  const playlistMatch = url.match(/[&?]list=([a-zA-Z0-9_-]+)/i);
-  return playlistMatch ? playlistMatch[1] : null;
-}
-
-// Function สำหรับค้นหาเพลงจาก YouTube
-async function searchYouTubeVideos(query) {
-  try {
-    console.log('Searching YouTube for:', query); // Debug log
-    const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-      params: {
-        part: 'snippet',
-        q: query,
-        type: 'video',
-        videoCategoryId: '10',
-        maxResults: 5,
-        key: process.env.YOUTUBE_API_KEY
-      }
-    });
-
-    if (!response.data.items || response.data.items.length === 0) {
-      console.log('No results found'); // Debug log
-      return [];
-    }
-
-    const results = response.data.items.map(item => ({
-      id: item.id.videoId,
-      title: item.snippet.title,
-      thumbnail: item.snippet.thumbnails.medium.url,
-      channel: item.snippet.channelTitle
-    }));
-
-    console.log('Processed results:', results); // Debug log
-    return results;
-
-  } catch (error) {
-    console.error('YouTube search error:', error);
-    throw error;
-  }
-}
-
+// Start server
 server.listen(3000, () => {
   console.log('listening on *:3000');
 });
