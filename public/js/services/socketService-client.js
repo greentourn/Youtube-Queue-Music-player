@@ -1,4 +1,4 @@
-// services/socketService.js
+// services/socketService-client.js
 let socket = null;
 
 export function initializeSocket() {

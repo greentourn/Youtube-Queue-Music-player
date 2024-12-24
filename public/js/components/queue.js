@@ -1,5 +1,5 @@
 // components/queue.js
-import { fetchVideoDetails, extractVideoId } from '../services/youtubeService.js';
+import { fetchVideoDetails, extractVideoId } from '../services/youtubeService-client.js';
 import { showModal } from '../services/uiService.js';
 import { createElementWithClasses, appendChildren, addFadeAnimation, handleAsyncOperation } from '../utils/helpers.js';
 

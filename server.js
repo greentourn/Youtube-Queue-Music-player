@@ -4,10 +4,10 @@ const http = require('http');
 const { Server } = require('socket.io');
 const chatWithAI = require('./ChatBot/chatAI');
 const DiscordMusicBot = require('./ChatBot/discord-bot');
-const YouTubeService = require('./services/youtubeService');
+const YouTubeService = require('./services/youtubeService-server');
 const QueueService = require('./services/queueService');
 const StateService = require('./services/stateService');
-const SocketService = require('./services/socketService');
+const SocketService = require('./services/socketService-server');
 const packageInfo = require('./package.json');
 
 const app = express();

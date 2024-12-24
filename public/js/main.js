@@ -1,4 +1,4 @@
-import { initializeSocket } from './services/socketService.js';
+import { initializeSocket } from './services/socketService-client.js';
 import { initializePlayer } from './components/player.js';
 import { initializeQueue } from './components/queue.js';
 import { initializeChat } from './components/chat.js';
