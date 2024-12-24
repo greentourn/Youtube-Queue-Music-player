@@ -28,22 +28,26 @@ export function initializeSocket() {
   });
 
   // เพิ่มการจัดการ playbackState event
-  socket.on('playbackState', (state) => {
-    if (window.player) {
-      const currentVideoId = window.player.getVideoData()?.video_id;
-      
+  socket.on("playbackState", (state) => {
+    // ตรวจสอบว่า player ถูก initialize แล้วและมีฟังก์ชันที่จำเป็น
+    if (typeof window.player?.getVideoData === "function") {
+      const currentVideoId = window.player.getVideoData().video_id;
+
       // ถ้าเป็นวิดีโอใหม่
       if (state.videoId && state.videoId !== currentVideoId) {
         window.player.loadVideoById({
           videoId: state.videoId,
-          startSeconds: state.timestamp
+          startSeconds: state.timestamp,
         });
       }
-      
+
       // จัดการสถานะการเล่น
-      if (state.isPlaying) {
+      if (state.isPlaying && typeof window.player.playVideo === "function") {
         window.player.playVideo();
-      } else {
+      } else if (
+        !state.isPlaying &&
+        typeof window.player.pauseVideo === "function"
+      ) {
         window.player.pauseVideo();
       }
     }
@@ -54,7 +58,7 @@ export function initializeSocket() {
 
 export function getSocket() {
   if (!socket) {
-    throw new Error('Socket not initialized');
+    throw new Error("Socket not initialized");
   }
   return socket;
 }

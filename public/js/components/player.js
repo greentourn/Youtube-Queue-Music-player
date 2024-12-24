@@ -21,15 +21,39 @@ const SYNC_INTERVAL = 1000;
 const SEEK_DELAY = 500;
 
 export function initializePlayer(socket) {
-  if (window.YT && window.YT.Player) {
-    createPlayer(socket);
-  } else {
-    window.onYouTubeIframeAPIReady = () => createPlayer(socket);
+  function initYouTubePlayer() {
+    if (!document.getElementById("player")) {
+      console.error("Player container not found");
+      return;
+    }
+
+    try {
+      createPlayer(socket);
+      setupSocketListeners(socket);
+      startStateSync(socket);
+      setupVisibilityHandler(socket);
+    } catch (error) {
+      console.error("Error initializing player:", error);
+      // Retry initialization after a delay
+      setTimeout(() => initYouTubePlayer(), 1000);
+    }
   }
 
-  setupSocketListeners(socket);
-  startStateSync(socket);
-  setupVisibilityHandler(socket);
+  // Check if YT API is ready
+  if (window.YT && window.YT.Player) {
+    initYouTubePlayer();
+  } else {
+    // If not ready, set up the callback and inject the API
+    window.onYouTubeIframeAPIReady = initYouTubePlayer;
+
+    // Inject YouTube API if not already present
+    if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      const firstScriptTag = document.getElementsByTagName("script")[0];
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+    }
+  }
 }
 
 function setupVisibilityHandler(socket) {
@@ -81,9 +105,15 @@ async function createPlayer(socket) {
       width: "100%",
       videoId: "",
       events: {
-        onReady: () => onPlayerReady(socket),
+        onReady: () => {
+          window.player = player; // Set global player after it's ready
+          onPlayerReady(socket);
+        },
         onStateChange: (event) => onPlayerStateChange(event, socket),
-        onError: (error) => console.error("YouTube Player Error:", error),
+        onError: (error) => {
+          console.error("YouTube Player Error:", error);
+          handlePlayerError(error, socket);
+        },
       },
       playerVars: {
         controls: 1,
@@ -94,11 +124,49 @@ async function createPlayer(socket) {
         enablejsapi: 1,
       },
     });
-    window.player = player;
-    setupPlayerListeners(socket);
   } catch (error) {
     console.error("Error creating YouTube player:", error);
+    throw error;
   }
+}
+
+// เพิ่มฟังก์ชันใหม่สำหรับจัดการ player error
+function handlePlayerError(error, socket) {
+  isProcessingStateUpdate = false;
+
+  switch (error.data) {
+    case 2:
+      console.error("Invalid video ID");
+      socket.emit("videoError", { type: "invalid_id" });
+      break;
+    case 5:
+      console.error("HTML5 player error");
+      socket.emit("videoError", { type: "html5_error" });
+      break;
+    case 100:
+      console.error("Video not found or removed");
+      socket.emit("videoError", { type: "not_found" });
+      break;
+    case 101:
+    case 150:
+      console.error("Video not embeddable");
+      socket.emit("videoError", { type: "not_embeddable" });
+      break;
+  }
+
+  // Request next video in queue after error
+  socket.emit("skipSong");
+}
+
+// เพิ่มฟังก์ชันตรวจสอบสถานะของ player
+function isPlayerReady() {
+  return (
+    player &&
+    typeof player.getPlayerState === "function" &&
+    typeof player.getCurrentTime === "function" &&
+    typeof player.getVideoData === "function" &&
+    typeof player.loadVideoById === "function"
+  );
 }
 
 function onPlayerReady(socket) {
@@ -249,7 +317,7 @@ function setupSocketListeners(socket) {
 }
 
 async function handlePlaybackStateUpdate(state, serverNow) {
-  if (!player || !state.videoId) return;
+  if (!isPlayerReady() || !state.videoId) return;
 
   try {
     const currentVideoId = player.getVideoData()?.video_id;
@@ -347,6 +415,7 @@ function startStateSync(socket) {
     syncInterval = setInterval(() => {
       if (
         !isProcessingStateUpdate &&
+        isPlayerReady() &&
         player?.getPlayerState() === YT.PlayerState.PLAYING &&
         !document.hidden
       ) {
@@ -405,7 +474,7 @@ function startStateSync(socket) {
 }
 
 function broadcastCurrentState(socket) {
-  if (!isProcessingStateUpdate && player && player.getCurrentTime) {
+  if (!isProcessingStateUpdate && isPlayerReady()) {
     const currentState = {
       videoId: player.getVideoData()?.video_id,
       timestamp: player.getCurrentTime(),
