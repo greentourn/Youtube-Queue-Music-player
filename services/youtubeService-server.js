@@ -24,43 +24,72 @@ class YouTubeService {
   async searchVideos(query, retries = 3) {
     for (let i = 0; i < retries; i++) {
       try {
-        const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-          params: {
-            part: 'snippet',
-            q: query,
-            type: 'video',
-            videoCategoryId: '10',
-            maxResults: 5,
-            key: this.apiKey
-          }
-        });
-        // const filteredItems = response.data.items.filter((item, index) => {
-        //   const duration =
-        //     detailsResponse.data.items[index].contentDetails.duration;
-        //   const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-        //   if (!match) return false; // Skip if duration format is not matched
-        //   const hours = parseInt(match[1]) || 0;
-        //   const minutes = parseInt(match[2]) || 0;
-        //   const seconds = parseInt(match[3]) || 0;
-        //   const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-        //   return totalSeconds <= 1200; // Filter videos shorter than or equal to 20 minutes
-        // });
+        // เพิ่ม logging เพื่อ debug
+        console.log(`Attempting YouTube search (attempt ${i + 1}/${retries})`);
+        console.log(`Query: ${query}`);
 
-        // return filteredItems.map((item) => ({
-        //   id: item.id.videoId,
-        //   title: item.snippet.title,
-        //   thumbnail: item.snippet.thumbnails.medium.url,
-        //   channel: item.snippet.channelTitle,
-        // }));
-        return response.data.items.map(item => ({
+        const response = await axios.get(
+          "https://www.googleapis.com/youtube/v3/search",
+          {
+            params: {
+              part: "snippet",
+              q: query,
+              type: "video",
+              videoCategoryId: "10",
+              maxResults: 5,
+              key: this.apiKey,
+            },
+            // เพิ่ม timeout และ headers
+            timeout: 5000,
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        // เพิ่ม logging สำหรับ response
+        if (response.data.items?.length) {
+          console.log(`Found ${response.data.items.length} results`);
+        }
+        return response.data.items.map((item) => ({
           id: item.id.videoId,
           title: item.snippet.title,
           thumbnail: item.snippet.thumbnails.medium.url,
-          channel: item.snippet.channelTitle
+          channel: item.snippet.channelTitle,
+
+          // const filteredItems = response.data.items.filter((item, index) => {
+          //   const duration =
+          //     detailsResponse.data.items[index].contentDetails.duration;
+          //   const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
+          //   if (!match) return false; // Skip if duration format is not matched
+          //   const hours = parseInt(match[1]) || 0;
+          //   const minutes = parseInt(match[2]) || 0;
+          //   const seconds = parseInt(match[3]) || 0;
+          //   const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+          //   return totalSeconds <= 1200; // Filter videos shorter than or equal to 20 minutes
+          // });
+
+          // return filteredItems.map((item) => ({
+          //   id: item.id.videoId,
+          //   title: item.snippet.title,
+          //   thumbnail: item.snippet.thumbnails.medium.url,
+          //   channel: item.snippet.channelTitle,
+          // }));
         }));
       } catch (error) {
+        // เพิ่ม detailed error logging
+        console.error("YouTube API Error:", {
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message,
+        });
+
         if (i === retries - 1) throw error;
-        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+        // เพิ่ม exponential backoff
+        const delay = Math.min(1000 * Math.pow(2, i), 5000);
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
       }
     }
   }

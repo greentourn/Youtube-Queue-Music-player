@@ -185,6 +185,7 @@ class SocketService {
           if (searchMatch) {
             const searchQuery = searchMatch[1].trim();
             try {
+              console.log("Initiating YouTube search:", searchQuery);
               const searchResults = await this.youtubeService.searchVideos(
                 searchQuery
               );
@@ -201,11 +202,19 @@ class SocketService {
                 });
               }
               return;
-            } catch (error) {
-              console.error("Error searching videos:", error);
+            } catch (searchError) {
+              console.error("Search error details:", searchError);
+
+              // ส่งข้อความ error ที่เฉพาะเจาะจงมากขึ้น
+              let errorMessage = "ขออภัย เกิดข้อผิดพลาดในการค้นหาเพลง";
+              if (searchError.response?.status === 403) {
+                errorMessage += " (API quota exceeded)";
+              } else if (searchError.code === "ETIMEDOUT") {
+                errorMessage += " (timeout)";
+              }
+
               socket.emit("chat response", {
-                message:
-                  "ขออภัย เกิดข้อผิดพลาดในการค้นหาเพลง กรุณาลองใหม่อีกครั้ง",
+                message: errorMessage,
                 isCommand: false,
               });
             }
