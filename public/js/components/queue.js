@@ -69,33 +69,42 @@ async function updateQueue(socket, queue) {
 }
 
 async function createQueueItem(socket, song, index) {
-    const listItem = createElementWithClasses('div', 'list-group-item song-item');
-    addFadeAnimation(listItem, 'in');
+  const listItem = createElementWithClasses("div", "list-group-item song-item");
+  addFadeAnimation(listItem, "in");
 
-    const videoId = extractVideoId(song);
-    if (!videoId) return null;  // Skip invalid songs
+  const videoId = extractVideoId(song);
+  if (!videoId) return null;
 
-    try {
-        const videoDetails = await fetchVideoDetails(videoId);
-        
-        // Create queue item content
-        const content = {
-            playButton: createPlayButtonContainer(socket, index),
-            thumbnail: createThumbnail(videoDetails),
-            title: createTitleText(videoDetails),
-            controls: createControls(socket, index)
-        };
+  try {
+    const videoDetails = await fetchVideoDetails(videoId);
+    // Fallback content if details are basic
+    const content = {
+      playButton: createPlayButtonContainer(socket, index),
+      thumbnail: createThumbnail(videoDetails),
+      title: createTitleText(videoDetails),
+      controls: createControls(socket, index),
+    };
 
-        // Append all content elements
-        Object.values(content).forEach(element => {
-            if (element) listItem.appendChild(element);
-        });
+    Object.values(content).forEach((element) => {
+      if (element) listItem.appendChild(element);
+    });
 
-        return listItem;
-    } catch (error) {
-        console.error('Error fetching video details:', error);
-        return null;
-    }
+    return listItem;
+  } catch (error) {
+    console.error("Error fetching video details:", error);
+    // Create basic item with just video ID and controls
+    const basicContent = {
+      playButton: createPlayButtonContainer(socket, index),
+      title: createBasicTitleText(videoId),
+      controls: createControls(socket, index),
+    };
+
+    Object.values(basicContent).forEach((element) => {
+      if (element) listItem.appendChild(element);
+    });
+
+    return listItem;
+  }
 }
 
 function createLoadingIndicator() {
