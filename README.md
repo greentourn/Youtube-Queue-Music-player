@@ -1,108 +1,136 @@
-# Music Queue Web Application v0.8.8
+# Dudee Music Queue
 
-A real-time collaborative music queue web application with YouTube integration, chat AI assistant, and Discord bot support.
+A real-time collaborative music player web application with AI assistant integration and Discord bot support.
 
 ## Features
 
-- Real-time music playback synchronization across multiple clients
-- YouTube video integration with search and playlist support
-- AI-powered chat assistant for music recommendations and playback control
-- Discord bot integration
-- Fault-tolerant queue management
-- State synchronization with server
-- Fallback service for YouTube API quota management
+- 🎵 YouTube video playback with synchronized playback state across all clients
+- 💬 AI-powered music assistant for natural language song requests and controls
+- 🤖 Discord bot integration for remote music control
+- 📱 Responsive web interface with queue management
+- 🔄 Real-time updates using Socket.IO
+- 🔍 YouTube search integration
+- 🤝 Multi-user support with concurrent playback synchronization
+- 🎮 Advanced playback controls (play, pause, skip, etc.)
+- 📋 Playlist support
+
+## Technology Stack
+
+- **Frontend**:
+  - HTML5/CSS3
+  - JavaScript (ES6+)
+  - Socket.IO Client
+  - YouTube IFrame API
+  - Bootstrap 5
+
+- **Backend**:
+  - Node.js
+  - Express.js
+  - Socket.IO
+  - Discord.js
+  - Google Generative AI (Gemini)
+
+- **APIs**:
+  - YouTube Data API v3
+  - Discord API
 
 ## Prerequisites
 
-- Node.js (v14+)
-- Discord Bot Token
+- Node.js (v16+)
 - YouTube API Key
+- Discord Bot Token
 - Gemini API Key
+- MongoDB (optional)
 
-## Installation
+## Environment Variables
 
-1. Clone the repository
-2. Install dependencies:
-```bash
-npm install
-```
+Create a `.env` file with the following:
 
-3. Create `.env` file with the following variables:
-```
+```env
 YOUTUBE_API_KEY=your_youtube_api_key
 DISCORD_TOKEN=your_discord_bot_token
 GEMINI_API_KEY=your_gemini_api_key
 WEBAPP_URL=http://localhost:3000
 ```
 
-## Running the Application
+## Installation
 
-Start the server:
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/dudee-music-queue.git
+cd dudee-music-queue
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Start the server:
 ```bash
 npm start
 ```
 
-The application will be available at `http://localhost:3000`
-
-## Architecture
+## Project Structure
 
 ### Frontend Components
-- `player.js`: YouTube player integration and state management
-- `queue.js`: Music queue interface and management
-- `chat.js`: AI chat interface and interactions
+
+- **Player (`components/player.js`)**: YouTube player integration with sync support
+- **Queue (`components/queue.js`)**: Music queue management interface
+- **Chat (`components/chat.js`)**: AI assistant chat interface
 
 ### Backend Services
-- `queueService.js`: Queue state management
-- `stateService.js`: Playback state synchronization
-- `youtubeService-server.js`: YouTube API integration
-- `socketService-server.js`: Real-time communication
-- `chatAI.js`: AI chat processing
 
-### Features
+- **Queue Service**: Manages the music queue
+- **State Service**: Handles playback state synchronization
+- **Socket Service**: Real-time communication
+- **YouTube Service**: YouTube API integration with fallback
+- **Chat AI**: Gemini-powered music assistant
+- **Discord Bot**: Discord integration for remote control
 
-#### Music Playback
-- Synchronized playback across all clients
-- Real-time state updates
-- Auto-recovery from connection issues
-- Playlist support
+## API Endpoints
 
-#### Chat AI Assistant
-- Natural language song requests
-- Playback control through chat
-- Music recommendations
-- Context-aware responses
+- `GET /version`: Get application version
+- `GET /server-time`: Get server timestamp
+- `GET /youtube-info/:videoId`: Get video details
+- `GET /current-state`: Get current playback state
 
-#### Discord Bot
-- Music playback control
+## WebSocket Events
+
+### Client → Server
+- `addSong`: Add song to queue
+- `skipSong`: Skip current song
+- `removeSong`: Remove song from queue
+- `updatePlaybackState`: Update playback state
+- `chat message`: Send message to AI assistant
+
+### Server → Client
+- `queueUpdated`: Queue update notification
+- `playbackState`: Playback state update
+- `chat response`: AI assistant response
+- `search results`: YouTube search results
+
+## AI Assistant Commands
+
+The AI assistant understands natural language commands for:
+- Music search and playback
 - Queue management
-- AI chat integration
-- Search functionality
+- Playback control
+- Music recommendations
+- General music-related queries
 
-## API Keys
+## Contributing
 
-Required API keys:
-- YouTube Data API v3
-- Discord Bot Token
-- Gemini AI API
-
-## Error Handling
-
-The application includes:
-- YouTube API quota management
-- Fallback service for API failures
-- Connection recovery
-- State synchronization
-- Error logging
-
-## Version History
-
-Current Version: 0.8.8
-- AI chat improvements
-- Enhanced state synchronization
-- YouTube fallback service
-- Improved error handling
-- Discord bot integration
+1. Fork the repository
+2. Create a feature branch
+3. Commit changes
+4. Push to branch
+5. Create Pull Request
 
 ## License
 
-ISC License
+ISC
+
+## Support
+
+For support, email support@dudee-music.com or create an issue in the repository.
