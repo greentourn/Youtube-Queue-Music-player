@@ -131,6 +131,3 @@ The AI assistant understands natural language commands for:
 
 ISC
 
-## Support
-
-For support, email support@dudee-music.com or create an issue in the repository.
