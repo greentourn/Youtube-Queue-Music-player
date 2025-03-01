@@ -107,23 +107,12 @@ async function createQueueItem(socket, song, index) {
   }
 }
 
-function createLoadingIndicator() {
-    return createElementWithClasses('div', 'spinner-border text-primary');
-}
 
-function createQueueItemContent(socket, videoDetails, index) {
-    const playButtonContainer = createPlayButtonContainer(socket, index);
-    const thumbnail = createThumbnail(videoDetails);
-    const titleText = createTitleText(videoDetails);
-    const controls = createControls(socket, index);
-
-    return {
-        playButton: playButtonContainer,
-        thumbnail: thumbnail,
-        title: titleText,
-        controls: controls
-    };
-}
+function createBasicTitleText(videoId) {
+    const titleText = createElementWithClasses('span', 'd-flex text-white');
+    titleText.textContent = `Video ${videoId}`;
+    return titleText;
+  }
 
 function createPlayButtonContainer(socket, index) {
     const container = createElementWithClasses('div', 'play-button-container');

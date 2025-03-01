@@ -3,7 +3,9 @@ const axios = require("axios");
 
 // Initialize Gemini API with retry mechanism
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-1.5-flash"
+});
 
 // Enhanced command definitions with more natural language patterns and new commands
 const COMMANDS = {
@@ -250,6 +252,7 @@ async function getQueueDetails(songQueue) {
 async function chatWithAI(messages, currentSong, songQueue) {
   try {
     if (!process.env.GEMINI_API_KEY) {
+      console.error("Gemini API key is not configured");
       throw new Error("Gemini API key is not configured");
     }
 
@@ -259,6 +262,7 @@ async function chatWithAI(messages, currentSong, songQueue) {
     ) {
       return "ประวัติการสนทนาไม่ถูกต้อง";
     }
+    console.log("API key found, validating messages");
 
     // Get enhanced song details
     let currentSongDetails = await getEnhancedSongDetails(currentSong);
@@ -274,7 +278,9 @@ async function chatWithAI(messages, currentSong, songQueue) {
     );
 
     // Generate AI response
-    const result = await model.generateContent(context);
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: context }] }],
+    });
     const response = result.response?.text();
 
     if (!response) throw new Error("Invalid AI response");
@@ -287,6 +293,12 @@ async function chatWithAI(messages, currentSong, songQueue) {
     );
   } catch (error) {
     console.error("Error in chatWithAI:", error);
+    
+    // ส่งข้อความ fallback กลับไป
+    if (error.message && error.message.includes("404")) {
+      return "ขออภัย ระบบ AI ไม่สามารถใช้งานได้ในขณะนี้ โปรดลองอีกครั้งในภายหลัง หรือติดต่อผู้ดูแลระบบ";
+    }
+    
     return "ขออภัย เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง";
   }
 }
