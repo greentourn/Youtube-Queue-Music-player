@@ -15,10 +15,15 @@ let isInitialSync = true;
 let isUserInteracting = false;
 let wasPlayingBeforeHidden = false;
 let userInteractionTimeout;
-const INTERACTION_TIMEOUT = 3000;
 let userSeekTimeout = null;
+let initialSyncCompleted = false; // เพิ่มตัวแปรใหม่เพื่อตรวจสอบว่าซิงค์ครั้งแรกเสร็จสิ้นแล้ว
+let clientJoinTime = Date.now(); // เก็บเวลาที่ client เชื่อมต่อ
+let waitForInitialSync = true; // ตัวแปรป้องกันการส่ง state ก่อนได้รับการซิงค์
+
+const INTERACTION_TIMEOUT = 3000;
 const SYNC_INTERVAL = 1000;
 const SEEK_DELAY = 500;
+const SYNC_THRESHOLD = 3; // ค่า threshold ในการซิงค์เวลาเพิ่มขึ้นเป็น 3 วินาทีเพื่อให้น้อยลง
 
 export function initializePlayer(socket) {
   function initYouTubePlayer() {
@@ -64,30 +69,14 @@ function setupVisibilityHandler(socket) {
       wasPlayingBeforeHidden =
         player.getPlayerState() === YT.PlayerState.PLAYING;
     } else {
-      // เมื่อเปิดหน้าต่างขึ้นมา ขอข้อมูลล่าสุดจาก server แต่ไม่ย้อนกลับไปเล่นเพลงเดิม
-      const currentVideoId = player.getVideoData()?.video_id;
+      // ขอข้อมูลล่าสุดจาก server ทุกครั้งที่กลับมา
       socket.emit("requestInitialQueue", null, async (response) => {
         if (response?.currentPlaybackState) {
-          // ตรวจสอบว่าเพลงปัจจุบันยังเป็นเพลงเดียวกันหรือไม่
-          if (response.currentPlaybackState.videoId === currentVideoId) {
-            // ถ้าเป็นเพลงเดียวกัน อัพเดทเฉพาะสถานะการเล่น
-            if (
-              response.currentPlaybackState.isPlaying !== wasPlayingBeforeHidden
-            ) {
-              if (response.currentPlaybackState.isPlaying) {
-                player.playVideo();
-              } else {
-                player.pauseVideo();
-              }
-            }
-          } else {
-            // ถ้าเป็นเพลงใหม่ โหลดเพลงใหม่
-            const serverTime = getServerTime();
-            await handlePlaybackStateUpdate(
-              response.currentPlaybackState,
-              serverTime
-            );
-          }
+          const serverNow = getServerTime();
+          await handlePlaybackStateUpdate(
+            response.currentPlaybackState,
+            serverNow
+          );
           lastKnownState = response.currentPlaybackState;
         }
       });
@@ -130,7 +119,6 @@ async function createPlayer(socket) {
   }
 }
 
-// เพิ่มฟังก์ชันใหม่สำหรับจัดการ player error
 function handlePlayerError(error, socket) {
   isProcessingStateUpdate = false;
 
@@ -185,6 +173,8 @@ async function initializePlayerState(socket) {
 
     if (currentPlaybackState.videoId) {
       const serverTime = getServerTime();
+      
+      // ปรับปรุงให้คำนวณเวลาที่ผ่านไปอย่างแม่นยำ
       const timeDiff = (serverTime - currentPlaybackState.lastUpdate) / 1000;
       const startSeconds =
         currentPlaybackState.timestamp +
@@ -198,12 +188,18 @@ async function initializePlayerState(socket) {
         timestamp: startSeconds,
       };
 
+      // ทำเครื่องหมายว่าได้รับการซิงค์แล้ว
+      waitForInitialSync = false;
+      
       player.loadVideoById({
         videoId: currentPlaybackState.videoId,
         startSeconds: startSeconds,
       });
 
       await updateNowPlaying(currentPlaybackState.videoId);
+      
+      // หลังจากโหลดวิดีโอเรียบร้อย ทำเครื่องหมายว่าซิงค์เสร็จสิ้น
+      initialSyncCompleted = true;
     }
 
     isProcessingStateUpdate = false;
@@ -218,12 +214,19 @@ function onPlayerStateChange(event, socket) {
 
   switch (event.data) {
     case YT.PlayerState.PLAYING:
+      console.log("Video playing");
+      if (!document.hidden) {
+        broadcastCurrentState(socket);
+      }
+      break;
     case YT.PlayerState.PAUSED:
+      console.log("Video paused");
       if (!document.hidden) {
         broadcastCurrentState(socket);
       }
       break;
     case YT.PlayerState.ENDED:
+      console.log("Video ended event detected by YouTube API");
       handleVideoEnded(socket);
       break;
   }
@@ -283,6 +286,13 @@ function setupPlayerListeners(socket) {
 }
 
 function setupSocketListeners(socket) {
+  // เพิ่ม handler สำหรับการตั้งค่า client
+  socket.on("clientConfig", (config) => {
+    waitForInitialSync = config.waitForSync;
+    clientJoinTime = config.joinTime || Date.now();
+    console.log(`Received client config, waitForSync: ${waitForInitialSync}`);
+  });
+
   socket.on("playbackState", async (state) => {
     if (!player || !player.loadVideoById) return;
     if (state.lastUpdate <= (lastKnownState?.lastUpdate || 0)) return;
@@ -292,6 +302,13 @@ function setupSocketListeners(socket) {
       const serverNow = getServerTime();
       await handlePlaybackStateUpdate(state, serverNow);
       lastKnownState = state;
+      
+      // อัพเดทสถานะการซิงค์
+      if (isInitialSync) {
+        isInitialSync = false;
+        initialSyncCompleted = true;
+        console.log('Initial sync completed');
+      }
     } catch (error) {
       console.error("Error handling playback state:", error);
     } finally {
@@ -308,6 +325,13 @@ function setupSocketListeners(socket) {
       const serverNow = getServerTime();
       await handlePlaybackStateUpdate(state.currentPlaybackState, serverNow);
       lastKnownState = state.currentPlaybackState;
+      
+      // ทำเครื่องหมายว่าได้รับการซิงค์เริ่มต้นแล้ว
+      setTimeout(() => {
+        waitForInitialSync = false;
+        initialSyncCompleted = true;
+        console.log('Initial state sync completed');
+      }, 2000); // รอสักครู่ก่อนยืนยันว่าซิงค์เสร็จ
     } catch (error) {
       console.error("Error handling initial state:", error);
     } finally {
@@ -321,6 +345,8 @@ async function handlePlaybackStateUpdate(state, serverNow) {
 
   try {
     const currentVideoId = player.getVideoData()?.video_id;
+    
+    // คำนวณเวลาที่ผ่านไปด้วยความแม่นยำมากขึ้น
     const timeDiff = Math.max(0, (serverNow - state.lastUpdate) / 1000);
     const targetTime = state.isPlaying
       ? state.timestamp + timeDiff
@@ -354,9 +380,9 @@ async function handlePlaybackStateUpdate(state, serverNow) {
 
       await updateNowPlaying(state.videoId);
     } else {
-      // ซิงค์เวลาถ้าแตกต่างกันมากกว่า 2 วินาที
+      // ซิงค์เวลาอย่างอัตโนมัติถ้าแตกต่างกันมากกว่า SYNC_THRESHOLD วินาที
       const currentTime = player.getCurrentTime();
-      if (Math.abs(currentTime - targetTime) > 2) {
+      if (Math.abs(currentTime - targetTime) > SYNC_THRESHOLD) {
         player.seekTo(targetTime, true);
       }
     }
@@ -379,13 +405,22 @@ async function handlePlaybackStateUpdate(state, serverNow) {
 function handleVideoEnded(socket) {
   if (!socket || isProcessingStateUpdate) return;
 
+  console.log("Processing video ended event");
   isProcessingStateUpdate = true;
-  updateNowPlaying(null);
-
-  // แจ้ง server ว่าวิดีโอจบและรอการตอบกลับ
-  socket.emit("videoEnded", null, async () => {
-    // รอให้ server ประมวลผลเสร็จก่อนขอข้อมูลใหม่
+  
+  // ดึงข้อมูลวิดีโอปัจจุบัน
+  const currentVideoId = player?.getVideoData()?.video_id;
+  
+  // แจ้งเตือน server ว่าวิดีโอจบแล้ว
+  socket.emit("videoEnded", { 
+    videoId: currentVideoId,
+    timestamp: Date.now()
+  }, (acknowledgeData) => {
+    console.log("Server acknowledged video ended event:", acknowledgeData);
+    
+    // รอ server จัดการกับคิวและเริ่มเพลงถัดไป
     setTimeout(() => {
+      // ขอข้อมูลล่าสุดจาก server
       socket.emit("requestInitialQueue", null, async (response) => {
         if (response?.currentPlaybackState?.videoId) {
           const serverTime = getServerTime();
@@ -397,13 +432,13 @@ function handleVideoEnded(socket) {
         }
         isProcessingStateUpdate = false;
       });
-    }, 500); // รอ 500ms เพื่อให้แน่ใจว่า server ประมวลผลเสร็จ
+    }, 500);
   });
 }
 
 function startStateSync(socket) {
   let syncInterval;
-  const SYNC_CHECK_INTERVAL = 1000;
+  const SYNC_CHECK_INTERVAL = 5000; // เพิ่มความถี่การซิงค์เป็นทุก 5 วินาที
   const MAX_RETRY_COUNT = 3;
   let retryCount = 0;
 
@@ -416,50 +451,34 @@ function startStateSync(socket) {
       if (
         !isProcessingStateUpdate &&
         isPlayerReady() &&
-        player?.getPlayerState() === YT.PlayerState.PLAYING &&
-        !document.hidden
+        !document.hidden &&
+        !isUserInteracting
       ) {
-        const currentState = {
-          videoId: player.getVideoData()?.video_id,
-          timestamp: player.getCurrentTime(),
-          isPlaying: player.getPlayerState() === YT.PlayerState.PLAYING,
-          lastUpdate: getServerTime(),
-        };
-
-        // Only emit if significant change
-        if (shouldEmitStateUpdate(currentState, lastKnownState)) {
-          socket.emit(
-            "updatePlaybackState",
-            currentState,
-            (acknowledgement) => {
-              if (!acknowledgement && retryCount < MAX_RETRY_COUNT) {
-                retryCount++;
-                // Exponential backoff for retries
-                const backoffDelay = Math.min(
-                  1000 * Math.pow(2, retryCount),
-                  5000
+        // ขอข้อมูลสถานะจาก server ใหม่ทุกช่วงเวลา แต่เพิ่มเงื่อนไขการตรวจสอบ
+        if (initialSyncCompleted && !waitForInitialSync) {
+          socket.emit("requestInitialQueue", null, async (response) => {
+            if (response?.currentPlaybackState) {
+              // ตรวจสอบว่า state เปลี่ยนไปจากที่รู้หรือไม่
+              if (
+                !lastKnownState ||
+                response.currentPlaybackState.lastUpdate > lastKnownState.lastUpdate ||
+                response.currentPlaybackState.videoId !== lastKnownState.videoId
+              ) {
+                const serverTime = getServerTime();
+                await handlePlaybackStateUpdate(
+                  response.currentPlaybackState,
+                  serverTime
                 );
-                scheduleNextSync(backoffDelay);
-              } else {
-                retryCount = 0;
+                lastKnownState = response.currentPlaybackState;
               }
             }
-          );
-          lastKnownState = currentState;
+          });
+        } else {
+          // ถ้ายังไม่ได้ซิงค์ครั้งแรก ให้ขอสถานะเริ่มต้นแทน
+          socket.emit("requestInitialQueue");
         }
       }
     }, delay);
-  }
-
-  function shouldEmitStateUpdate(newState, oldState) {
-    if (!oldState) return true;
-
-    const timeDiff = Math.abs(newState.timestamp - oldState.timestamp);
-    const isStateChanged =
-      newState.isPlaying !== oldState.isPlaying ||
-      newState.videoId !== oldState.videoId;
-
-    return timeDiff > 1 || isStateChanged;
   }
 
   // Start initial sync
@@ -475,12 +494,38 @@ function startStateSync(socket) {
 
 function broadcastCurrentState(socket) {
   if (!isProcessingStateUpdate && isPlayerReady()) {
+    // ตรวจสอบว่า client นี้ได้รับการซิงค์จาก server แล้วหรือยัง
+    if (waitForInitialSync || !initialSyncCompleted) {
+      console.log('Skipping state broadcast - waiting for initial sync');
+      return;
+    }
+    
+    // ตรวจสอบว่า client เพิ่งเชื่อมต่อหรือไม่
+    const timeConnected = Date.now() - clientJoinTime;
+    if (timeConnected < 3000) { // น้อยกว่า 3 วินาที
+      console.log('Skipping state broadcast - client just connected');
+      return;
+    }
+    
     const currentState = {
       videoId: player.getVideoData()?.video_id,
       timestamp: player.getCurrentTime(),
       isPlaying: player.getPlayerState() === YT.PlayerState.PLAYING,
       lastUpdate: getServerTime(),
     };
+    
+    // ตรวจสอบกรณีที่ client อาจจะรีเซ็ต timestamp
+    const resetAttempt = lastKnownState && 
+                       lastKnownState.videoId === currentState.videoId && 
+                       lastKnownState.timestamp > 10 && 
+                       currentState.timestamp < 3;
+                       
+    if (resetAttempt) {
+      console.log('Preventing timestamp reset attempt');
+      socket.emit('requestInitialQueue'); // ขอ state ใหม่จาก server แทน
+      return;
+    }
+    
     lastKnownState = currentState;
     socket.emit("updatePlaybackState", currentState);
   }
@@ -513,4 +558,4 @@ async function updateNowPlaying(videoId) {
 
 window.addEventListener("beforeunload", () => {
   if (syncInterval) clearInterval(syncInterval);
-});;
+});

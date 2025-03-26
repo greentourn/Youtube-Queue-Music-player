@@ -8,6 +8,7 @@ const YouTubeService = require('./services/youtubeService-server');
 const QueueService = require('./services/queueService');
 const StateService = require('./services/stateService');
 const SocketService = require('./services/socketService-server');
+const ServerPlayerService = require('./services/serverPlayerService');
 const packageInfo = require('./package.json');
 
 const app = express();
@@ -18,7 +19,24 @@ const io = new Server(server);
 const youtubeService = new YouTubeService(process.env.YOUTUBE_API_KEY);
 const queueService = new QueueService();
 const stateService = new StateService();
-const socketService = new SocketService(io, youtubeService, queueService, stateService);
+
+// Initialize server-side player service
+const serverPlayer = new ServerPlayerService(youtubeService, queueService, stateService);
+
+// Initialize socket service with server player reference
+const socketService = new SocketService(io, youtubeService, queueService, stateService, serverPlayer);
+
+// Connect server player events to socket.io broadcasting
+serverPlayer.on('queueUpdated', (queue) => {
+  io.emit('queueUpdated', queue);
+});
+
+serverPlayer.on('playbackState', (state) => {
+  io.emit('playbackState', state);
+});
+
+// Start server-side player
+serverPlayer.start();
 
 // Initialize Discord bot
 const discordBot = new DiscordMusicBot(
@@ -71,5 +89,5 @@ socketService.setupSocketHandlers();
 
 // Start server
 server.listen(3000, () => {
-  console.log('listening on *:3000');
+  console.log('Server running on http://localhost:3000');
 });

@@ -2,13 +2,20 @@
 const chatWithAI = require("../ChatBot/chatAI");
 
 class SocketService {
-  constructor(io, youtubeService, queueService, stateService) {
+  constructor(io, youtubeService, queueService, stateService, serverPlayer) {
     this.io = io;
     this.youtubeService = youtubeService;
     this.queueService = queueService;
     this.stateService = stateService;
+    this.serverPlayer = serverPlayer; // เพิ่ม reference ไปยัง ServerPlayer
     this.chatHistory = new Map();
     this.activeUsers = 0;
+    this.clientSyncMap = new Map(); // เก็บสถานะการซิงค์ของแต่ละ client
+
+    // เก็บ cache ของข้อมูลความยาววิดีโอ
+    this.videoDurationCache = new Map();
+    // เก็บเวลาล่าสุดที่มีการอัพเดต state เพื่อป้องกันการรีเซ็ตจาก client ใหม่
+    this.lastStateUpdateTime = Date.now();
   }
 
   extractVideoId(url) {
@@ -25,35 +32,45 @@ class SocketService {
 
   setupSocketHandlers() {
     this.io.on("connection", (socket) => {
-      console.log("New client connected");
+      console.log(`New client connected: ${socket.id}`);
+
+      // เพิ่ม client เข้าสู่ระบบติดตาม
+      if (this.serverPlayer) {
+        this.serverPlayer.addActiveClient();
+      }
+      // ทำเครื่องหมายว่า client นี้เพิ่งเชื่อมต่อ ยังไม่ได้ซิงค์
+      this.clientSyncMap.set(socket.id, {
+        synced: false,
+        joinTime: Date.now()
+      });
+
       this.chatHistory.set(socket.id, []);
       this.activeUsers++;
       this.io.emit("activeUsers", this.activeUsers);
 
-      // Send initial state
-      socket.emit("initialState", {
-        songQueue: this.queueService.getQueue(),
-        currentPlaybackState: this.stateService.getState(),
-      });
+      // ส่งสถานะเริ่มต้นไปยัง client ใหม่แบบ one-way (client ไม่ส่ง state กลับ)
+      this.sendInitialState(socket);
 
-      socket.on("requestInitialQueue", () => {
-        const currentState = this.stateService.getState();
-        const queue = this.queueService.getQueue();
-
-        socket.emit("initialState", {
-          currentPlaybackState: {
-            ...currentState,
-            lastUpdate: Date.now(),
-          },
-          songQueue: queue,
+      socket.on("requestInitialQueue", async (_, callback) => {
+        const state = await this.prepareCurrentState();
+        // ทำเครื่องหมายว่า client นี้ได้รับการซิงค์แล้ว
+        this.clientSyncMap.set(socket.id, {
+          synced: true,
+          joinTime: this.clientSyncMap.get(socket.id)?.joinTime || Date.now(),
+          lastSync: Date.now()
         });
+
+        if (typeof callback === 'function') {
+          callback(state);
+        } else {
+          socket.emit("initialState", state);
+        }
       });
 
-      socket.on("getInitialState", () => {
-        const queue = this.queueService.getQueue();
-        const state = this.stateService.getState();
-        socket.emit("queueUpdated", queue);
-        socket.emit("playbackState", state);
+      socket.on("getInitialState", async () => {
+        const state = await this.prepareCurrentState();
+        socket.emit("queueUpdated", state.songQueue);
+        socket.emit("playbackState", state.currentPlaybackState);
       });
 
       // Handle chat messages
@@ -207,7 +224,7 @@ class SocketService {
 
               // ส่งข้อความ error ที่เฉพาะเจาะจงมากขึ้น
               let errorMessage = "ขออภัย เกิดข้อผิดพลาดในการค้นหาเพลง";
-              if (searchError.response?.status === 403) {
+              if (searchError.response?.status === 403 || searchError.response?.status === 429) {
                 errorMessage += " (API quota exceeded)";
               } else if (searchError.code === "ETIMEDOUT") {
                 errorMessage += " (timeout)";
@@ -239,10 +256,54 @@ class SocketService {
       socket.on("updatePlaybackState", (state, callback) => {
         if (this.queueService.mutex.lock()) {
           try {
+            const clientInfo = this.clientSyncMap.get(socket.id);
             const currentState = this.stateService.getState();
+            const now = Date.now();
 
-            // Validate and update state
+            // ตรวจสอบว่า client นี้ได้รับการซิงค์แล้วหรือไม่
+            if (!clientInfo || !clientInfo.synced) {
+              console.log(`[SocketService] Rejecting state update from unsynced client: ${socket.id}`);
+              if (typeof callback === "function") {
+                callback(false);
+              }
+              return;
+            }
+
+            // ป้องกัน client ใหม่ที่เพิ่งเชื่อมต่อไม่ให้รีเซ็ต timestamp
+            if (now - clientInfo.joinTime < 5000 && state.timestamp < 5) {
+              console.log(`[SocketService] New client trying to reset timestamp, ignoring`);
+              // ส่ง state ปัจจุบันกลับไปที่ client แทน
+              socket.emit("playbackState", this.stateService.getState());
+              if (typeof callback === "function") {
+                callback(false);
+              }
+              return;
+            }
+
+            // ป้องกันการรีเซ็ต timestamp ถ้า server มีการเล่นมาสักพักแล้ว
+            if (currentState.videoId === state.videoId &&
+              currentState.timestamp > 10 &&
+              state.timestamp < 3 &&
+              now - this.lastStateUpdateTime > 5000) {
+              console.log(`[SocketService] Preventing timestamp reset: server=${currentState.timestamp}s, client=${state.timestamp}s`);
+              // ส่ง state ล่าสุดกลับไปให้ client แทน
+              socket.emit("playbackState", this.stateService.getState());
+              if (typeof callback === "function") {
+                callback(false);
+              }
+              return;
+            }
+
+            // อัพเดท state เฉพาะกรณีที่ผ่านการตรวจสอบแล้ว
             if (this.stateService.updateState(state)) {
+              this.lastStateUpdateTime = now;
+
+              // อัพเดทสถานะ sync ของ client นี้
+              this.clientSyncMap.set(socket.id, {
+                ...clientInfo,
+                lastSync: now
+              });
+
               // Broadcast to all clients except sender
               socket.broadcast.emit(
                 "playbackState",
@@ -454,59 +515,71 @@ class SocketService {
         this.io.emit("playbackState", this.stateService.getState());
       });
 
+      // แก้ไขการจัดการ videoEnded ให้เชื่อมกับ ServerPlayerService
       socket.on("videoEnded", async (data, callback) => {
+        console.log("Video ended event received from client:", data);
+
         if (this.queueService.mutex.lock()) {
           try {
-            const queue = this.queueService.getQueue();
+            // บันทึก log และตรวจสอบว่าตรงกับเพลงที่เล่นอยู่จริงๆ หรือไม่
             const currentState = this.stateService.getState();
 
-            if (queue.length > 0) {
-              const currentVideoId = this.extractVideoId(queue[0]);
+            if (data.videoId === currentState.videoId) {
+              console.log(`Confirmed: Video ${data.videoId} has ended`);
 
-              // ตรวจสอบว่าวิดีโอที่จบเป็นวิดีโอปัจจุบันหรือไม่
-              if (currentVideoId === currentState.videoId) {
-                // ลบเพลงปัจจุบันออกจากคิว
-                this.queueService.removeSong(0);
-                const updatedQueue = this.queueService.getQueue();
+              // เรียก ServerPlayer เพื่อจัดการเล่นเพลงถัดไป
+              this.serverPlayer.emit('videoEnded', data);
 
-                // ส่งการอัพเดทคิวไปยังทุกเครื่อง
-                this.io.emit("queueUpdated", updatedQueue);
+              // ลบเพลงปัจจุบันออกจากคิว
+              this.queueService.removeSong(0);
+              const updatedQueue = this.queueService.getQueue();
 
-                // เล่นเพลงถัดไปถ้ามี
-                if (updatedQueue.length > 0) {
-                  const nextVideoId = this.extractVideoId(updatedQueue[0]);
-                  if (nextVideoId) {
-                    const newState = {
-                      videoId: nextVideoId,
-                      timestamp: 0,
-                      isPlaying: true,
-                      lastUpdate: Date.now(),
-                    };
-                    this.stateService.updateState(newState);
-                    this.io.emit("playbackState", this.stateService.getState());
-                  }
-                } else {
-                  // ไม่มีเพลงในคิวแล้ว
-                  const emptyState = {
-                    videoId: null,
+              // ส่งการอัพเดทคิวไปยังทุกเครื่อง
+              this.io.emit("queueUpdated", updatedQueue);
+
+              // เล่นเพลงถัดไปถ้ามี
+              if (updatedQueue.length > 0) {
+                const nextVideoId = this.extractVideoId(updatedQueue[0]);
+                if (nextVideoId) {
+                  const newState = {
+                    videoId: nextVideoId,
                     timestamp: 0,
-                    isPlaying: false,
+                    isPlaying: true,
                     lastUpdate: Date.now(),
                   };
-                  this.stateService.updateState(emptyState);
+                  this.stateService.updateState(newState);
                   this.io.emit("playbackState", this.stateService.getState());
                 }
+              } else {
+                // ไม่มีเพลงในคิวแล้ว
+                const emptyState = {
+                  videoId: null,
+                  timestamp: 0,
+                  isPlaying: false,
+                  lastUpdate: Date.now(),
+                };
+                this.stateService.updateState(emptyState);
+                this.io.emit("playbackState", this.stateService.getState());
               }
+            } else {
+              console.log(`Ignored: Video end event for ${data.videoId} doesn't match current ${currentState.videoId}`);
             }
 
-            // ส่ง callback เพื่อให้ client รู้ว่าเสร็จแล้ว
+            // ส่ง callback กลับไปที่ client
             if (typeof callback === "function") {
-              callback();
+              callback({
+                success: true,
+                message: "Video end event processed",
+                nextSong: this.queueService.getQueue()[0] || null
+              });
             }
           } catch (error) {
             console.error("Error handling video ended:", error);
             if (typeof callback === "function") {
-              callback(error);
+              callback({
+                success: false,
+                error: "Failed to process video end"
+              });
             }
           } finally {
             this.queueService.mutex.unlock();
@@ -514,12 +587,91 @@ class SocketService {
         }
       });
 
-      // Handle disconnect
+      // จัดการกรณี disconnect
       socket.on("disconnect", () => {
+        console.log(`Client disconnected: ${socket.id}`);
         this.activeUsers--;
         this.io.emit("activeUsers", this.activeUsers);
         this.chatHistory.delete(socket.id);
+        this.clientSyncMap.delete(socket.id);
+
+        // แจ้ง serverPlayer ว่ามี client ตัดการเชื่อมต่อ
+        if (this.serverPlayer) {
+          this.serverPlayer.removeActiveClient();
+        }
       });
+    });
+
+    // เพิ่ม Event Listener สำหรับ ServerPlayer
+    if (this.serverPlayer) {
+      this.serverPlayer.on('videoEnded', () => {
+        console.log('[SocketService] Received videoEnded event from ServerPlayer');
+      });
+    }
+  }
+
+  // เพิ่มเมธอดใหม่สำหรับ prepare state ที่พร้อมส่งไปยัง client
+  async prepareCurrentState() {
+    const currentState = this.stateService.getState();
+    const queue = this.queueService.getQueue();
+    const now = Date.now();
+
+    // คำนวณเวลาที่ผ่านไปตั้งแต่อัพเดทล่าสุด
+    const timeDiff = (now - currentState.lastUpdate) / 1000;
+    const adjustedTimestamp = currentState.isPlaying
+      ? currentState.timestamp + timeDiff
+      : currentState.timestamp;
+
+    // ถ้ามีวิดีโอกำลังเล่น ให้ตรวจสอบความยาวของวิดีโอ
+    if (currentState.videoId && !currentState.duration) {
+      try {
+        const videoInfo = await this.youtubeService.getVideoInfo(currentState.videoId);
+        if (videoInfo.contentDetails && videoInfo.contentDetails.duration) {
+          // แปลง duration จาก ISO 8601 Duration format เป็นวินาที
+          const durationStr = videoInfo.contentDetails.duration;
+          let duration = 0;
+
+          const hours = durationStr.match(/(\d+)H/);
+          const minutes = durationStr.match(/(\d+)M/);
+          const seconds = durationStr.match(/(\d+)S/);
+
+          if (hours) duration += parseInt(hours[1]) * 3600;
+          if (minutes) duration += parseInt(minutes[1]) * 60;
+          if (seconds) duration += parseInt(seconds[1]);
+
+          // อัพเดท state ด้วยความยาวของวิดีโอ
+          currentState.duration = duration;
+          this.stateService.setVideoDuration(currentState.videoId, duration);
+
+          console.log(`[SocketService] Retrieved duration for ${currentState.videoId}: ${duration}s`);
+        }
+      } catch (error) {
+        console.error(`[SocketService] Error getting video duration: ${error.message}`);
+      }
+    }
+
+    return {
+      songQueue: queue,
+      currentPlaybackState: {
+        ...currentState,
+        timestamp: adjustedTimestamp,
+        lastUpdate: now
+      }
+    };
+  }
+
+  // เพิ่มเมธอดใหม่สำหรับส่งสถานะเริ่มต้นไปยัง client
+  async sendInitialState(socket) {
+    const state = await this.prepareCurrentState();
+
+    // ส่งสถานะไปยัง client โดยไม่ทำเครื่องหมายว่าซิงค์แล้ว
+    // client ต้องเรียก requestInitialQueue เพื่อยืนยันการซิงค์
+    socket.emit("initialState", state);
+
+    // เพิ่ม flag สำหรับป้องกันการฟังก์ชัน updatePlaybackState ใน client
+    socket.emit("clientConfig", {
+      waitForSync: true,
+      joinTime: Date.now()
     });
   }
 

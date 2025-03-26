@@ -2,6 +2,11 @@
 import { createElementWithClasses, appendChildren } from '../utils/helpers.js';
 
 let timeOffset = 0;
+let lastSyncTime = 0;
+let syncRetries = 0;
+const MAX_SYNC_RETRIES = 3;
+const SYNC_INTERVAL = 60000; // 1 minute
+const RETRY_INTERVAL = 5000; // 5 seconds
 
 export async function syncWithServer() {
   const startTime = Date.now();
@@ -11,17 +16,47 @@ export async function syncWithServer() {
     const endTime = Date.now();
     const networkDelay = (endTime - startTime) / 2;
 
+    // คำนวณ offset ระหว่าง client/server
     timeOffset = serverTime - (startTime + networkDelay);
+    lastSyncTime = Date.now();
+    syncRetries = 0;
 
-    setTimeout(syncWithServer, 5 * 60 * 1000);
+    // ตั้งเวลาให้มีการซิงค์กับเซิร์ฟเวอร์ทุก 1 นาที
+    setTimeout(syncWithServer, SYNC_INTERVAL);
+    
+    console.log(`Time synchronized with server. Offset: ${timeOffset}ms`);
+    return timeOffset;
   } catch (error) {
     console.error('Time sync failed:', error);
-    setTimeout(syncWithServer, 10000);
+    syncRetries++;
+    
+    // ถ้าการซิงค์ล้มเหลว ให้ลองใหม่ไม่เกิน MAX_SYNC_RETRIES ครั้งโดยรอทุก 5 วินาที
+    if (syncRetries < MAX_SYNC_RETRIES) {
+      setTimeout(syncWithServer, RETRY_INTERVAL);
+    } else {
+      // ถ้าล้มเหลวเกิน MAX_SYNC_RETRIES ครั้ง ให้ลองอีกใน 1 นาที
+      syncRetries = 0;
+      setTimeout(syncWithServer, SYNC_INTERVAL);
+    }
+    
+    return timeOffset;
   }
 }
 
 export function getServerTime() {
   return Date.now() + timeOffset;
+}
+
+// ฟังก์ชันใหม่เพื่อตรวจสอบว่าควรทำการซิงค์เวลาใหม่หรือไม่
+export function shouldResync() {
+  // ถ้าเวลาที่ผ่านมาตั้งแต่การซิงค์ครั้งล่าสุดเกิน 5 นาที
+  return Date.now() - lastSyncTime > 5 * 60 * 1000;
+}
+
+// ฟังก์ชันใหม่เพื่อคำนวณความคลาดเคลื่อนของเวลาระหว่าง client/server
+export function getTimeDrift(serverTimestamp) {
+  const currentServerTime = getServerTime();
+  return Math.abs(currentServerTime - serverTimestamp);
 }
 
 export function showModal(options) {
